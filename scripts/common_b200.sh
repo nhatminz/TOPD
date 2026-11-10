@@ -5,6 +5,11 @@ set -euo pipefail
 # This copy is self-contained; it never sources or writes the sibling project.
 TOPD_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+# torchrun honors PYTHON_EXEC even when launched with another interpreter.
+# Resolve without realpath: following a venv's symlink would lose that venv.
+PYTHON_BIN="$("${PYTHON_BIN}" -c 'import sys; print(sys.executable)')"
+export PYTHON_BIN
+export PYTHON_EXEC="${PYTHON_BIN}"
 export PYTHONPATH="${TOPD_ROOT}:${PYTHONPATH:-}"
 export STORAGE_ROOT="${STORAGE_ROOT:-/workspace/storage-shared}"
 export HF_HUB_DISABLE_PROGRESS_BARS=1

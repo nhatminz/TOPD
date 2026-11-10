@@ -22,10 +22,25 @@ python3 -m pip install -r TOPD/requirements.txt
 ```
 
 `PYTHON_BIN=/path/to/venv/bin/python` chọn interpreter nếu không dùng `python3`.
+Launcher gán lại `PYTHON_EXEC` cho torchrun và khởi động console entry point
+vLLM bằng chính interpreter này; không dùng executable `vllm` từ một venv khác
+trên `PATH`. Cần cài dependencies vào đúng Python đã chọn.
 vLLM cần `>=0.17.1,<0.18`, Transformers `>=4.57,<5`. Production dùng BF16,
 full-parameter FSDP và bắt buộc GPU B200, cùng quy tắc resolve path với bản gốc.
 Model/data được đọc trực tiếp từ storage đã có trên B200. Kiểm thử CPU dùng model
 Qwen3 nhỏ sinh ngẫu nhiên để kiểm thuật toán; không đổi cấu hình production.
+Nếu gặp `Engine core initialization failed`, xem [hướng dẫn startup](docs/B200_STARTUP.md)
+và lỗi engine gốc trong server log.
+Log B200 đã xác nhận `flashinfer-cubin==0.6.6` lệch với
+`flashinfer-python==0.6.4`. Sửa trong đúng venv trước khi train/eval:
+
+```bash
+PYTHON_BIN="$(command -v python3)" bash TOPD/scripts/fix_flashinfer_b200.sh
+```
+
+Script chỉ căn phiên bản cubin theo FlashInfer đang cài rồi kiểm tra import.
+Thêm `--dry-run` để xem lệnh. Train/eval phát hiện lệch phiên bản và báo lỗi sớm;
+các launcher không tự cài package.
 
 ## Chạy train trên GPU 0 và 1
 
@@ -146,6 +161,32 @@ Suite giữ Competition-MATH, MATH-500, AIME24, AIME25, AMC23 và GPQA-Diamond n
 completion. Có thể đặt `TOPD_RUN_DIR`, `TOPD_CHECKPOINT`, `TOPD_EVAL_OUTPUT`, hoặc truyền `--model /path/checkpoint-...`,
 `--output /new/eval_dir`, `--seed 43` cho re-eval riêng. Các option này thuộc
 `python -m topd.cli evaluate --help`.
+
+Đánh giá **cùng checkpoint** với ba evaluation seed, trên đủ sáu dataset:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1 TRAIN_SEED=42 \
+bash TOPD/scripts/eval_multiseed_b200.sh
+```
+
+Mặc định: `final`, evaluation seeds `42 43 44`, mỗi seed sinh tám response/bài;
+Avg@8 và Pass@8 dùng chung completions. Không cần eval đơn trước đó.
+Kết quả nằm trong run train:
+`eval_multiseed/seeds_42_43_44/final/seed_<seed>/`,
+`eval_summary_seeds_42_43_44.{json,csv,md}`; thống kê dùng sample std (`ddof=1`).
+Chạy lại sẽ dùng kết quả seed đã hoàn tất nếu request không đổi.
+
+Nhận cùng CLI với `BellmanOPD_analysis/scripts/eval_multiseed_b200.sh`:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1 bash TOPD/scripts/eval_multiseed_b200.sh \
+  --run-output /absolute/path/to/topd_run/topd \
+  --checkpoints final --seeds 42 43 44 --tag eval_3seeds
+```
+
+Thêm `--dry-run` để xem kế hoạch từ resolved config/checkpoint đã có mà không
+tải model. Multiseed này đo biến thiên khi lấy mẫu eval, không đo biến thiên
+của ba lần training. Script eval đơn phía trên vẫn chỉ chạy một eval seed.
 
 Chạy nhiều training seed, chỉ khi muốn chi trả cho ba full run:
 

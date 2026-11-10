@@ -1,9 +1,9 @@
 {
   "date": "2026-11-10",
   "unit_and_regression_tests": {
-    "passed": 79,
+    "passed": 98,
     "failed": 0,
-    "elapsed_seconds": 8.32,
+    "elapsed_seconds": 15.26,
     "junit": "docs/test_results.xml"
   },
   "smoke": {
@@ -31,14 +31,14 @@
       "rejected_candidates": 0
     },
     "times": {
-      "prepare_time_sec": 0.6797670433297753,
-      "future_generation_time_sec": 0.6427055317908525,
-      "ot_time_sec": 0.02991796564310789,
-      "trajectory_update_time_sec": 0.01463647373020649
+      "prepare_time_sec": 0.6371695343405008,
+      "future_generation_time_sec": 0.6020867088809609,
+      "ot_time_sec": 0.028200448490679264,
+      "trajectory_update_time_sec": 0.012778196483850479
     },
     "status": "passed",
     "synthetic_only": true,
-    "run_directory": "outputs/smoke/tiny-qwen3-iokg3it0",
+    "run_directory": "outputs/smoke/tiny-qwen3-ib6o3ntv",
     "mid_rollout_resume_matches_uninterrupted": true,
     "teacher_frozen": true,
     "student_updated": true,
@@ -68,5 +68,12 @@
   "confirmed_b200_models": {
     "teacher": "/workspace/storage-shared/models/Qwen3-4B",
     "student": "/workspace/storage-shared/models/Qwen3-1.7B"
+  },
+  "runtime_and_multiseed_tests": "test_b200_runtime.py and test_multiseed_topd.py: real two-worker torchrun interpreter selection, console entry-point execution, current-attempt engine cause retention, six-dataset three-evaluation-seed planning and aggregation/resume",
+  "flashinfer_followup": {
+    "confirmed_b200_failure": "flashinfer-python==0.6.4 versus flashinfer-cubin==0.6.6",
+    "regression_tests": "tests/test_dependencies.py (10 cases)",
+    "b200_package_replacement_executed_locally": false,
+    "b200_startup_verified": false
   }
 }

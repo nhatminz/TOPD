@@ -9,6 +9,7 @@ are excluded.
 - `b200_experiment/evaluation.py`
 - `b200_experiment/resume.py`
 - `b200_experiment/trainer.py`
+- `b200_experiment/vllm_rollout.py`
 
 ## All copied modules
 
@@ -70,6 +71,7 @@ are excluded.
 - `configs/qwen3_b200_cmt.yaml`
 - `configs/topd_compe_math.yaml`
 - `docs/B200_PATHS.md`
+- `docs/B200_STARTUP.md`
 - `docs/BASELINE_AUDIT.md`
 - `docs/FAIR_COMPARISON.md`
 - `docs/FILES_CREATED.md`
@@ -85,12 +87,17 @@ are excluded.
 - `scripts/common_b200.sh`
 - `scripts/compare_with_baseline.sh`
 - `scripts/eval_compe_math_4b_17b_1epoch.sh`
+- `scripts/eval_multiseed_b200.sh`
+- `scripts/fix_flashinfer_b200.sh`
 - `scripts/smoke_test.sh`
 - `scripts/train_compe_math_4b_17b_1epoch.sh`
 - `tests/conftest.py`
 - `tests/test_algorithm.py`
 - `tests/test_b200_paths.py`
+- `tests/test_b200_runtime.py`
+- `tests/test_dependencies.py`
 - `tests/test_distributed_topd.py`
+- `tests/test_multiseed_topd.py`
 - `tests/test_pipeline.py`
 - `tests/test_preparation.py`
 - `tests/test_reference_opd_core.py`
@@ -101,9 +108,14 @@ are excluded.
 - `topd/checkpoint.py`
 - `topd/cli.py`
 - `topd/configuration.py`
+- `topd/dependencies.py`
 - `topd/engine.py`
 - `topd/reporting.py`
 - `topd/smoke.py`
 
 The two qwen3_b200 config copies and two reference test copies remain unchanged.
-The new standalone B200 helper accepts the same original model/data/path aliases.
+The standalone B200 helper accepts the original model/data/path aliases and pins
+torchrun to the selected Python. The rollout adaptation changes interpreter
+selection and failure diagnostics; sampling and IPC flags are preserved.
+The explicit FlashInfer repair script aligns the cubin wheel with the installed
+flashinfer-python; train/eval check metadata without installing packages.

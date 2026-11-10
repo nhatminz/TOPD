@@ -83,7 +83,7 @@ def test_shared_response_mask_eos_and_padding():
 def test_original_core_scoring_and_evaluator_are_identical_to_audited_source():
     manifest = json.loads((ROOT/"docs/source_manifest.json").read_text())["sha256"]
     for name in ("opd_core.py", "data.py", "scoring.py", "models.py", "evaluation.py",
-                 "math_prompts.py", "vllm_rollout.py", "fsdp.py", "distributed.py",
+                 "math_prompts.py", "fsdp.py", "distributed.py",
                  "vllm_evaluation.py"):
         relative = f"b200_experiment/{name}"
         content = (ROOT/relative).read_bytes()

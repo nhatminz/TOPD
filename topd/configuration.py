@@ -141,6 +141,8 @@ def launch_config():
     mapping = {
         "STORAGE_ROOT": ("paths.storage_root", str),
         "ROLLOUT_SEED": ("rollout.seed", int),
+        "ROLLOUT_VLLM_LOGGING_LEVEL": ("rollout.vllm.logging_level", str),
+        "ROLLOUT_VLLM_STARTUP_TIMEOUT": ("rollout.vllm.startup_timeout", float),
         "TRAIN_DATA_SPLIT": ("data.split", lambda value: None if value.lower() == "null" else value),
         "TRAIN_PREFER_SOURCE_PROMPT": ("data.prefer_source_prompt", boolean),
         "MICRO_BATCH_SIZE_PER_GPU": ("training.micro_batch_size_per_gpu", int),

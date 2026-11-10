@@ -97,7 +97,7 @@ The user subsequently confirmed the B200 model paths `models/Qwen3-4B` and
 active TOPD defaults and the required CMT comparison overrides. Shared dataset
 paths and resolver semantics remain those of the original B200 project.
 
-Only `trainer.py`, `resume.py`, and `evaluation.py` differ from their audited
+Only `trainer.py`, `resume.py`, `evaluation.py`, and `vllm_rollout.py` differ from their audited
 copies. The trainer adds TOPD hooks, CMT group membership for TOPD, exact
 mid-rollout persistence, explicit coverage/cost metadata, and masked
 collective-only execution when a tail rank has no real row. Empty CUDA RNG
@@ -105,6 +105,10 @@ state supports CPU checkpoint smoke only; CUDA behavior is unchanged.
 Resume additionally checks TOPD/epoch/filter/clipping settings and rewinds
 TOPD metrics. Evaluation only appends the `TOPD` model display name to its
 whitelist; decoding, math parser and metric functions are identical.
+The rollout adaptation invokes the installed vLLM console entry point with the
+trainer's Python instead of resolving a foreign venv's executable from PATH,
+pins the child's PYTHON_EXEC, and retains earlier engine-worker errors in
+startup failure messages. Serving/sampling/weight-transfer options are unchanged.
 
 Original source files remain unchanged; `source_manifest.json` records the
 inspected bytes, and `FILES_CREATED.md` lists the standalone implementation.

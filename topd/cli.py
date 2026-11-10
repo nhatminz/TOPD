@@ -95,6 +95,10 @@ def prepare(args):
     mask = os.environ.get("CUDA_VISIBLE_DEVICES", "")
     if mask and len(mask.split(",")) != torch.cuda.device_count():
         raise RuntimeError(f"Requested CUDA_VISIBLE_DEVICES={mask}, but PyTorch sees {torch.cuda.device_count()} GPUs")
+    from .dependencies import check_flashinfer
+    if any(config.get(section, {}).get("backend") == "vllm"
+           for section in ("rollout", "training_evaluation", "evaluation")):
+        check_flashinfer()
     prior_provenance = config.get("model_provenance")
     provenance = resolve_official_models(config,
         verify_official=bool(config["topd"].get("verify_official_weights", False)))
@@ -147,6 +151,8 @@ def prepare(args):
 
 
 def evaluate(args):
+    from .dependencies import check_flashinfer
+    check_flashinfer()
     parser_selfcheck()
     paths = b200_run_paths()
     run = Path(args.run or paths["run_output"]).resolve()

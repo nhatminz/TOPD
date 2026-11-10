@@ -1,6 +1,6 @@
 # Validation results — 2026-11-10
 
-**79 tests passed, 0 failed (8.32 seconds)**. Machine-readable evidence:
+**98 tests passed, 0 failed (15.26 seconds)**. Machine-readable evidence:
 [`test_results.xml`](test_results.xml), [`test_results.json`](test_results.json).
 No full training or benchmark accuracy evaluation was started.
 
@@ -107,3 +107,39 @@ metadata checks preserve local paths. No production training was launched.
 The user confirmed `models/Qwen3-4B` and `models/Qwen3-1.7B`. Default-path tests
 check both absolute paths under `/workspace/storage-shared`; model identities
 remain 4B/non-Base. The historical CMT 8B/Base defaults are not selected.
+
+## Startup environment and evaluation-seed follow-up
+
+Nine additional tests exercise the reported mixed-venv startup path and the
+new standalone multiseed wrapper. The complete suite now has 88 passing tests.
+
+- Two real torchrun workers launched with an invalid inherited PYTHON_EXEC both
+  used the explicitly selected verification interpreter after sourcing the helper.
+- The rollout command executed an installed console-entry-point fixture using
+  the trainer's Python despite a foreign PATH, forwarding its serving arguments.
+- Independent vLLM children keep the existing torchrun rendezvous isolation and
+  matching GPU assignment; the child PYTHON_EXEC is pinned to the trainer.
+- A synthetic engine error more than 250 lines before the wrapper traceback
+  remains visible in the raised exception; stale causes from older attempts do not.
+- The new script plans final/ with evaluation seeds 42/43/44 on all six datasets;
+  original CLI run/seed overrides work. A synthetic three-seed evaluation verifies
+  both metrics, sample std, preservation of the resolved config and result reuse.
+
+The first production trace lacked the engine-worker root cause. These checks
+verify the environment correction and diagnostics, not successful vLLM startup
+on B200. No production rollout or real benchmark evaluation was run locally.
+
+## Confirmed FlashInfer version mismatch
+
+The follow-up B200 log establishes that flashinfer-cubin 0.6.6 and
+flashinfer-python 0.6.4 fail the upstream import version check. Ten more tests
+verify early rejection even with the bypass environment variable set, matching
+versions and optional CUDA-suffixed JIT-cache metadata, targeted repair command
+selection, no subprocess execution during repair dry-run, an unchanged correct
+installation, and mandatory import verification after repair. The preparation
+test fails before model access; a real shell dry-run reads controlled package
+metadata with the selected interpreter. The suite now has 98 passing tests.
+
+No FlashInfer wheel was installed or replaced in the CPU verification environment.
+The B200 repair command is supplied in `B200_STARTUP.md`; successful production
+startup remains to be verified on that server after replacing the mismatched wheel.

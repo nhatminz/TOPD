@@ -4,10 +4,11 @@ import atexit
 import json
 import math
 import os
+import re
 import signal
-import shutil
 import socket
 import subprocess
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
@@ -130,11 +131,6 @@ class VLLMRolloutEngine:
         return utilization
 
     def _server_command(self) -> list[str]:
-        executable = shutil.which("vllm")
-        if executable is None:
-            raise RuntimeError(
-                "Cannot find the vllm executable in the active venv; install requirements.txt"
-            )
         max_model_len = int(self.settings.get("max_model_len", 1024))
         required_length = (
             int(self.config["alfworld"]["max_episode_tokens"])
@@ -148,7 +144,13 @@ class VLLMRolloutEngine:
                 f"length {required_length}"
             )
         command = [
-            executable,
+            # Load the installed console entry point with the trainer's Python.
+            # A `vllm` on PATH may have a shebang for an unrelated virtualenv.
+            sys.executable,
+            "-c",
+            "from importlib.metadata import distribution; "
+            "next(ep for ep in distribution('vllm').entry_points "
+            "if ep.group == 'console_scripts' and ep.name == 'vllm').load()()",
             "serve",
             str(self.model_path),
             "--served-model-name",
@@ -208,6 +210,7 @@ class VLLMRolloutEngine:
 
     def _server_environment(self) -> dict[str, str]:
         environment = isolate_distributed_subprocess_environment()
+        environment["PYTHON_EXEC"] = sys.executable
         # These are launcher controls consumed by common_b200.sh, not vLLM
         # environment variables. Keep real vLLM settings, but do not leak our
         # own names into its unknown-environment-variable validation.
@@ -344,7 +347,7 @@ class VLLMRolloutEngine:
                     next_log = now + log_interval
                 time.sleep(0.5)
             else:
-                tail = self._server_log_tail(log_path)
+                tail = self._server_failure_details(log_path)
                 raise TimeoutError(
                     f"vLLM rollout rank {self.local_rank} did not become ready "
                     f"within {timeout:g}s (GPU {report['gpu']}, "
@@ -383,8 +386,32 @@ class VLLMRolloutEngine:
         raise RuntimeError(
             f"vLLM rollout rank {self.local_rank} exited "
             f"(exit={self.process.returncode if self.process is not None else 'unknown'}); "
-            f"see {log_path}:\n" + self._server_log_tail(log_path)
+            f"see {log_path}:\n" + self._server_failure_details(log_path)
         )
+
+    def _server_failure_details(self, log_path: Path) -> str:
+        """Keep engine-worker causes that precede the API server's traceback."""
+        if self.log_handle is not None:
+            self.log_handle.flush()
+        try:
+            content = log_path.read_text(encoding="utf-8", errors="replace")
+        except OSError as error:
+            return f"<could not read server log: {error}>"
+        # Logs are append-only. Ignore causes from earlier attempts.
+        lines = content.rsplit("\nRollout server launch:", 1)[-1].splitlines()
+        tail_start = max(0, len(lines) - 100)
+        cause_indices = set()
+        for index, line in enumerate(lines[:tail_start]):
+            if re.search(r"(?:Error|Exception):|\bERROR\b|error while loading", line):
+                cause_indices.update(range(max(0, index - 2), min(index + 3, tail_start)))
+        causes = [lines[index] for index in sorted(cause_indices)]
+        if len(causes) > 160:
+            causes = causes[:80] + ["<additional context omitted; see full log>"] + causes[-80:]
+        sections = []
+        if causes:
+            sections.append("Earlier engine errors:\n" + "\n".join(causes))
+        sections.append("Last server log lines:\n" + "\n".join(lines[tail_start:]))
+        return "\n\n".join(sections)
 
     def _server_log_tail(self, log_path: Path, lines: int = 40) -> str:
         if self.log_handle is not None:
