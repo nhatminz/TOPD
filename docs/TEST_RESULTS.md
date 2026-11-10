@@ -1,6 +1,6 @@
 # Validation results — 2026-11-10
 
-**69 tests passed, 0 failed (7.77 seconds)**. Machine-readable evidence:
+**79 tests passed, 0 failed (8.32 seconds)**. Machine-readable evidence:
 [`test_results.xml`](test_results.xml), [`test_results.json`](test_results.json).
 No full training or benchmark accuracy evaluation was started.
 
@@ -22,7 +22,7 @@ PYTHON_BIN=/path/to/verification/python \
 for script in TOPD/scripts/*.sh; do bash -n "$script"; done
 ```
 
-The train preview correctly resolved teacher/student identities, one epoch,
+The B200 train preview correctly resolved the shared storage asset paths, one epoch,
 seed 42, n=4, response 4096, PPO=64, lr=5e-6 and two-GPU vLLM concurrency 128.
 The configuration-only preview is not a successful production preflight.
 
@@ -83,9 +83,9 @@ zero GPU-memory values are CPU engineering measurements, not training cost for
 
 ## What remains unverified
 
-There is only one physical RTX 3090 here, with no `/workspace/storage-shared`
-Competition-MATH/model assets and no compatible local vLLM production runtime.
-The verification interpreter uses CPU PyTorch. Full-size BF16/FSDP/NCCL, CUDA IPC,
+The verification session uses CPU PyTorch and synthetic fixtures. Production
+configuration now requires B200 and existing local model/data assets from the
+same storage paths as BellmanOPD_analysis. Full-size BF16/FSDP/NCCL, CUDA IPC,
 teacher root embedding gathers under FSDP, B200 memory/throughput, real data
 counts and benchmark accuracy were not tested. These require the supplied
 launch command on the actual training server. The implementation is not
@@ -94,3 +94,16 @@ shared OPD normalization limitation remain documented.
 
 All **67** audited source/config/document files in `BellmanOPD_analysis` retain
 their recorded SHA256. Its Git working tree remains unchanged.
+
+## B200 path follow-up validation
+
+Nine added tests cover identical shared data/eval paths, original B200 environment
+alias precedence, absolute paths, relocated checkouts, method-specific run/result
+layout and offline local checkpoint handling. An additional test verifies that
+comparison discovers standalone evaluation under `results/<run>/eval/topd`.
+Default preparation never queries HF or downloads models; optional official
+metadata checks preserve local paths. No production training was launched.
+
+The user confirmed `models/Qwen3-4B` and `models/Qwen3-1.7B`. Default-path tests
+check both absolute paths under `/workspace/storage-shared`; model identities
+remain 4B/non-Base. The historical CMT 8B/Base defaults are not selected.

@@ -6,7 +6,7 @@ import pytest
 
 from b200_experiment.config import load_config, save_config
 from topd.configuration import ROOT
-from topd.reporting import aggregate_training_seeds, compare_runs
+from topd.reporting import aggregate_training_seeds, compare_runs, completed_evaluation
 
 
 def fixture_run(root, seed, value, method="topd"):
@@ -51,3 +51,15 @@ def test_compare_summary_and_mismatch_are_explicit(tmp_path):
     c["training"]["epochs"] = 3
     save_config(c, b/"resolved_config.yaml")
     assert not compare_runs(a, b, tmp_path/"mismatched.json")["matched"]
+
+
+def test_b200_results_directory_is_found_by_comparison(tmp_path):
+    run = tmp_path/"outputs/run42/topd"
+    run.parent.mkdir(parents=True)
+    fixture_run(run, 42, .3)
+    destination = tmp_path/"results/run42/eval/topd"
+    destination.parent.mkdir(parents=True)
+    (run/"evaluation").rename(destination)
+    (run/"evaluation_location.json").write_text(json.dumps({
+        "summary": str(destination/"summary.json"), "checkpoint": str(run/"final")}))
+    assert completed_evaluation(run)["benchmarks"]["Synthetic-fixture"]["avg_at_8"] == .3

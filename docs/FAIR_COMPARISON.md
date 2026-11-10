@@ -42,8 +42,9 @@ from a generated config for a future matched CMT run.
 
 The comparison checks configuration equality. An old run lacking weight/data
 attestations cannot prove the bytes used historically just from its path.
-TOPD verifies current official weights against pinned SHA256 and hashes its
-training files. Keep initial checkpoint/data hashes for the CMT rerun as well.
+TOPD records SHA256 of the existing local model/config/tokenizer and training
+files. Optional VERIFY_OFFICIAL_WEIGHTS=true compares official metadata without
+changing model paths. Keep initial checkpoint/data hashes for the CMT rerun as well.
 `prior_initialization_attested` in the manifest makes missing prior evidence
 visible; it is not silently inferred from a matching directory name.
 
@@ -55,7 +56,7 @@ an isolated CMT output. It can be run using the original project:
 PYTHONPATH="$PWD/BellmanOPD_analysis" CUDA_VISIBLE_DEVICES=0,1 \
 python3 -m torch.distributed.run --standalone --nproc_per_node=2 \
   -m b200_experiment.cli train \
-  --config "$PWD/TOPD/outputs/topd_compe_math_4b_17b_seed42/cmt_matched_config.yaml"
+  --config "$PWD/TOPD/outputs/topd_compe_math_4b_17b_seed42/topd/cmt_matched_config.yaml"
 ```
 
 This config becomes available after TOPD asset preparation; the command is not
@@ -63,8 +64,8 @@ run automatically. Alternatively use the original launcher with explicit values:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0,1 NUM_EPOCHS=1 SEED=42 ROLLOUT_SEED=42 \
-TEACHER_MODEL=/absolute/path/Qwen3-4B \
-STUDENT_MODEL=/absolute/path/Qwen3-1.7B \
+TEACHER_MODEL=models/Qwen3-4B \
+STUDENT_MODEL=models/Qwen3-1.7B \
 STORAGE_ROOT=/workspace/storage-shared \
 OUTPUT_DIR="$PWD/TOPD/outputs/cmt_matched_seed42" \
 bash BellmanOPD_analysis/scripts/train_cmt_b200.sh

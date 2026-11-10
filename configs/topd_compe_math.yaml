@@ -3,10 +3,11 @@ _base_: qwen3_b200_cmt.yaml
 experiment:
   method: topd
   seed: 42
-  output_dir: outputs/topd_compe_math_4b_17b_seed42
-  require_b200: false
+  output_dir: outputs/topd_compe_math_4b_17b_seed42/topd
+  require_b200: true
 
 models:
+  # User-confirmed B200 checkpoint paths, relative to STORAGE_ROOT.
   teacher_path: models/Qwen3-4B
   student_path: models/Qwen3-1.7B
 
@@ -18,9 +19,12 @@ topd:
   enabled: true
   teacher_source: Qwen/Qwen3-4B
   student_source: Qwen/Qwen3-1.7B
-  # Resolve/pin revisions and verify official safetensors at actual launch.
+  # Revisions are pinned when optional official metadata verification is enabled.
   teacher_revision: main
   student_revision: main
+  # B200 already has local checkpoints. Never download or redirect their paths.
+  # Optional official SHA256 comparison only queries HF metadata, not weights.
+  verify_official_weights: false
   future_window: 50
   # Reproduction assumptions, NOT reported paper hyperparameters.
   candidate_fraction: 0.02

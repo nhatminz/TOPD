@@ -1,26 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
-TOPD_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-export PYTHONPATH="${TOPD_ROOT}:${PYTHONPATH:-}"
-export PYTHONUNBUFFERED=1
-export TOKENIZERS_PARALLELISM=false
-export VLLM_LOGGING_LEVEL="${VLLM_LOGGING_LEVEL:-WARNING}"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common_b200.sh"
 cd "${TOPD_ROOT}"
+resolve_topd_run_paths
+mkdir -p "$(dirname "${TOPD_LAUNCH_CONFIG}")"
 if [[ "${1:-}" == "--dry-run" ]]; then
-  exec "${PYTHON_BIN}" -m topd.cli prepare --dry-run --output "${TOPD_ROOT}/outputs/launch_preview.yaml"
+  exec "${PYTHON_BIN}" -m topd.cli prepare --dry-run --output "${TOPD_LAUNCH_CONFIG}"
 fi
 if (( $# != 0 )); then
   echo "Usage: $0 [--dry-run]; use documented environment variables for configuration." >&2
   exit 2
 fi
-TOPD_LAUNCH_CONFIG="$(mktemp "${TMPDIR:-/tmp}/topd-launch.XXXXXXXX.yaml")"
-trap 'rm -f "${TOPD_LAUNCH_CONFIG}"' EXIT
-PREPARE_ARGS=(--output "${TOPD_LAUNCH_CONFIG}")
-if [[ "${DOWNLOAD_MODELS:-0}" == "1" ]]; then
-  PREPARE_ARGS+=(--download-models)
-fi
-"${PYTHON_BIN}" -m topd.cli prepare "${PREPARE_ARGS[@]}"
+"${PYTHON_BIN}" -m topd.cli prepare --output "${TOPD_LAUNCH_CONFIG}"
 TOPD_GPU_COUNT="$("${PYTHON_BIN}" -c 'import torch; print(torch.cuda.device_count())')"
 echo "TOPD: ${TOPD_GPU_COUNT} visible GPUs, teacher Qwen3-4B, student Qwen3-1.7B, one complete epoch."
 if (( TOPD_GPU_COUNT == 1 )); then

@@ -1,5 +1,5 @@
 {
-  "source_root": "/mnt/hdd/nhatminh/OPD/BellmanOPD_analysis",
+  "source_root": "../BellmanOPD_analysis",
   "git_commit": "2e1f4e591fc982d41e6efc3273a050fa22e60e03",
   "sha256": {
     "b200_experiment/data.py": "0ec29ff55ccf2b4f7ca89a38800bce3f2199fbdec075844f38ef88bbcb737564",

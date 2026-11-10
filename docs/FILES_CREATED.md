@@ -1,20 +1,16 @@
 # Exact implementation inventory
 
-All paths below are relative to `TOPD/`. The original project was not modified.
-Temporary dependency environments are outside this folder. Runtime tiny smoke
-artifacts are listed by `outputs/smoke/smoke_result.json`; full model/data caches
-were not copied.
+Paths are relative to `TOPD/`. Original BellmanOPD_analysis files were not
+modified. Git internals, runtime outputs/results and verification environments
+are excluded.
 
-## Copied source modules
-
-49 Python modules preserve the original self-contained package and its lazy
-infrastructure imports. Exactly three copied modules are adapted:
+## Adapted copied modules
 
 - `b200_experiment/evaluation.py`
 - `b200_experiment/resume.py`
 - `b200_experiment/trainer.py`
 
-All copied module paths:
+## All copied modules
 
 - `b200_experiment/__init__.py`
 - `b200_experiment/alfworld_cli.py`
@@ -73,6 +69,7 @@ All copied module paths:
 - `configs/qwen3_b200_base.yaml`
 - `configs/qwen3_b200_cmt.yaml`
 - `configs/topd_compe_math.yaml`
+- `docs/B200_PATHS.md`
 - `docs/BASELINE_AUDIT.md`
 - `docs/FAIR_COMPARISON.md`
 - `docs/FILES_CREATED.md`
@@ -85,12 +82,14 @@ All copied module paths:
 - `docs/test_results.json`
 - `docs/test_results.xml`
 - `requirements.txt`
+- `scripts/common_b200.sh`
 - `scripts/compare_with_baseline.sh`
 - `scripts/eval_compe_math_4b_17b_1epoch.sh`
 - `scripts/smoke_test.sh`
 - `scripts/train_compe_math_4b_17b_1epoch.sh`
 - `tests/conftest.py`
 - `tests/test_algorithm.py`
+- `tests/test_b200_paths.py`
 - `tests/test_distributed_topd.py`
 - `tests/test_pipeline.py`
 - `tests/test_preparation.py`
@@ -106,7 +105,5 @@ All copied module paths:
 - `topd/reporting.py`
 - `topd/smoke.py`
 
-`configs/qwen3_b200_base.yaml` and `configs/qwen3_b200_cmt.yaml` are unchanged
-configuration copies. The active overlay is `configs/topd_compe_math.yaml`.
-Reference tests `test_reference_opd_core.py` and `test_reference_scoring.py` are
-unchanged copies; all other TOPD tests and modules are new.
+The two qwen3_b200 config copies and two reference test copies remain unchanged.
+The new standalone B200 helper accepts the same original model/data/path aliases.

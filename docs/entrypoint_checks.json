@@ -1,14 +1,24 @@
 {
-  "parser_selfcheck": {
-    "status": "passed",
-    "parser": "unchanged math-verify",
-    "examples": 4
+  "status": "passed",
+  "train_dry_run": {
+    "status": "configuration_only",
+    "config": "TOPD/results/launch_configs/topd_compe_math_4b_17b_seed42.yaml",
+    "output": "TOPD/outputs/topd_compe_math_4b_17b_seed42/topd",
+    "assets_verified": false,
+    "teacher": "/workspace/storage-shared/models/Qwen3-4B",
+    "student": "/workspace/storage-shared/models/Qwen3-1.7B",
+    "training_data": "/workspace/storage-shared/nlp/minhpn19/data/competition_math/data/train-00000-of-00001.parquet"
   },
-  "production_on_cpu": "correctly rejected before asset download or training",
-  "comparison_entrypoint": {
-    "output": "/tmp/topd-script-fixture-xi3y_p5u/topd/comparison.json",
-    "matched": true
+  "b200_run_paths": {
+    "run_name": "topd_compe_math_4b_17b_seed42",
+    "run_output": "TOPD/outputs/topd_compe_math_4b_17b_seed42/topd",
+    "checkpoint": "TOPD/outputs/topd_compe_math_4b_17b_seed42/topd/final",
+    "eval_output": "TOPD/results/topd_compe_math_4b_17b_seed42/eval/topd",
+    "launch_config": "TOPD/results/launch_configs/topd_compe_math_4b_17b_seed42.yaml",
+    "base_eval_cache": "TOPD/outputs/.base_eval_cache"
   },
-  "visible_gpu_preview_concurrency": 128,
-  "verification_interpreter": "/tmp/topd-verification-iqfpluen/venv/bin/python"
+  "local_models_only": true,
+  "automatic_model_download": false,
+  "production_requires_b200": true,
+  "model_pair_note": "User confirmed models/Qwen3-4B and models/Qwen3-1.7B; resolved under STORAGE_ROOT."
 }

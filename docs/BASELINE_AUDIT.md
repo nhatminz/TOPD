@@ -92,6 +92,11 @@ optimizer and RNG every 150 updates and at end. FSDP FULL_SHARD student/teacher.
 
 ## Intentional copied-source adaptations
 
+The user subsequently confirmed the B200 model paths `models/Qwen3-4B` and
+`models/Qwen3-1.7B`, both relative to `/workspace/storage-shared`. These are the
+active TOPD defaults and the required CMT comparison overrides. Shared dataset
+paths and resolver semantics remain those of the original B200 project.
+
 Only `trainer.py`, `resume.py`, and `evaluation.py` differ from their audited
 copies. The trainer adds TOPD hooks, CMT group membership for TOPD, exact
 mid-rollout persistence, explicit coverage/cost metadata, and masked

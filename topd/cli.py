@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 
 from b200_experiment.config import load_config, resolve_runtime_paths, save_config
-from .configuration import ROOT, launch_config, resolve_official_models, sha256_file, validate_config
+from .configuration import ROOT, b200_run_paths, launch_config, resolve_official_models, sha256_file, validate_config
 from .reporting import aggregate_training_seeds, compare_runs, comparison_manifest
 
 
@@ -84,7 +84,10 @@ def prepare(args):
     if args.dry_run:
         save_config(config, args.output)
         print(json.dumps({"status": "configuration_only", "config": str(args.output),
-            "output": config["experiment"]["output_dir"], "assets_verified": False}, indent=2))
+            "output": config["experiment"]["output_dir"], "assets_verified": False,
+            "teacher": config["models"]["teacher_path"],
+            "student": config["models"]["student_path"],
+            "training_data": config["data"]["path"]}, indent=2))
         return
     import torch
     if not torch.cuda.is_available() or torch.cuda.device_count() == 0:
@@ -93,11 +96,12 @@ def prepare(args):
     if mask and len(mask.split(",")) != torch.cuda.device_count():
         raise RuntimeError(f"Requested CUDA_VISIBLE_DEVICES={mask}, but PyTorch sees {torch.cuda.device_count()} GPUs")
     prior_provenance = config.get("model_provenance")
-    provenance = resolve_official_models(config, download=args.download_models)
+    provenance = resolve_official_models(config,
+        verify_official=bool(config["topd"].get("verify_official_weights", False)))
     if config["training"].get("resume_from_checkpoint") and prior_provenance != provenance:
         raise ValueError("Resume would change verified model/tokenizer/config bytes")
     config["model_provenance"] = provenance
-    # Verified identity, tokenizer mapping and required dependencies before any
+    # Local identity checks, tokenizer mapping and dependencies before any
     # vLLM/HF model loading, plus complete dataset coverage and leak checks.
     from b200_experiment.preflight import run_preflight
     output = Path(config["experiment"]["output_dir"])
@@ -144,12 +148,14 @@ def prepare(args):
 
 def evaluate(args):
     parser_selfcheck()
-    run = Path(args.run).resolve()
+    paths = b200_run_paths()
+    run = Path(args.run or paths["run_output"]).resolve()
     config = resolve_runtime_paths(load_config(run/"resolved_config.yaml"))
     if config["experiment"]["method"] != "topd":
         raise ValueError("Evaluation expects a TOPD run's resolved_config.yaml")
     validate_config(config)
-    model = Path(args.model).resolve() if args.model else run/"final"
+    model = Path(args.model).resolve() if args.model else (
+        Path(paths["checkpoint"]) if os.environ.get("TOPD_CHECKPOINT") else run/"final")
     if not (model/"config.json").is_file():
         raise FileNotFoundError(f"No completed HF checkpoint at {model}")
     if args.seed is not None:
@@ -160,10 +166,14 @@ def evaluate(args):
     resolved = run/f".topd_eval_seed{config['evaluation']['vllm']['seed']}.yaml"
     save_config(config, resolved)
     namespace = argparse.Namespace(config=str(resolved), overlay=[], overrides=[],
-        name="TOPD", model=str(model), output=args.output or str(run/"evaluation"),
+        name="TOPD", model=str(model), output=args.output or paths["eval_output"],
         benchmarks=None, history_run_output=None)
     try:
         result = _evaluate_checkpoint(namespace)
+        (run/"evaluation_location.json").write_text(json.dumps({
+            "summary": str(Path(namespace.output).resolve()/"summary.json"),
+            "checkpoint": str(model),
+        }, indent=2)+"\n")
         print(json.dumps(result, indent=2))
     finally:
         resolved.unlink(missing_ok=True)
@@ -175,11 +185,12 @@ def main(argv=None):
     prepare_parser = commands.add_parser("prepare")
     prepare_parser.add_argument("--output", required=True, type=Path)
     prepare_parser.add_argument("--dry-run", action="store_true")
-    prepare_parser.add_argument("--download-models", action="store_true")
+    paths = commands.add_parser("paths", help="Resolve B200 run/result paths without accessing assets")
+    paths.add_argument("--key", choices=list(b200_run_paths()))
     train = commands.add_parser("train")
     train.add_argument("--config", required=True)
     evaluation = commands.add_parser("evaluate")
-    evaluation.add_argument("--run", required=True)
+    evaluation.add_argument("--run")
     evaluation.add_argument("--model")
     evaluation.add_argument("--output")
     evaluation.add_argument("--seed", type=int)
@@ -192,7 +203,10 @@ def main(argv=None):
     aggregate.add_argument("--output", required=True)
     commands.add_parser("parser-selfcheck")
     args = p.parse_args(argv)
-    if args.command == "prepare":
+    if args.command == "paths":
+        resolved = b200_run_paths()
+        print(resolved[args.key] if args.key else json.dumps(resolved, indent=2))
+    elif args.command == "prepare":
         prepare(args)
     elif args.command == "train":
         from b200_experiment.trainer import run_training

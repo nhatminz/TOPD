@@ -23,9 +23,9 @@ python3 -m pip install -r TOPD/requirements.txt
 
 `PYTHON_BIN=/path/to/venv/bin/python` chọn interpreter nếu không dùng `python3`.
 vLLM cần `>=0.17.1,<0.18`, Transformers `>=4.57,<5`. Production dùng BF16,
-full-parameter FSDP. Không có full Qwen GPU smoke/performance measurement trên
-máy triển khai hiện tại: máy này chỉ có một RTX 3090, không có storage B200.
-Kiểm thử CPU dùng model Qwen3 nhỏ sinh ngẫu nhiên, không tải model lớn.
+full-parameter FSDP và bắt buộc GPU B200, cùng quy tắc resolve path với bản gốc.
+Model/data được đọc trực tiếp từ storage đã có trên B200. Kiểm thử CPU dùng model
+Qwen3 nhỏ sinh ngẫu nhiên để kiểm thuật toán; không đổi cấu hình production.
 
 ## Chạy train trên GPU 0 và 1
 
@@ -33,7 +33,7 @@ Từ workspace chứa cả hai folder, trong môi trường đã cài dependenci
 
 ```bash
 CUDA_VISIBLE_DEVICES=0,1 TRAIN_SEED=42 \
-STORAGE_ROOT=/workspace/storage-shared DOWNLOAD_MODELS=1 \
+STORAGE_ROOT=/workspace/storage-shared \
 bash TOPD/scripts/train_compe_math_4b_17b_1epoch.sh
 ```
 
@@ -53,22 +53,29 @@ Các đường dẫn mặc định dưới `STORAGE_ROOT`:
 | AMC23 | `nlp/minhpn19/data/amc23/test-00000-of-00001.parquet` |
 | GPQA-Diamond (giữ suite gốc) | `nlp/minhpn19/data/GPQA-Diamond/gpqa_diamond.jsonl` |
 
-`DOWNLOAD_MODELS=1` chỉ tải official model nếu local checkpoint không có.
-Nó không tải dataset. Có thể chỉ định checkpoint có sẵn và parquet train:
+Không tải model/data và không chuyển checkpoint sang Hugging Face cache. Mọi
+asset tương đối được resolve dưới `STORAGE_ROOT=/workspace/storage-shared`
+bằng đúng `b200_experiment.config.resolve_runtime_paths` của bản gốc. Model
+local thiếu sẽ báo lỗi kèm path cụ thể. Các biến path của BellmanOPD_analysis
+được nhận với cùng thứ tự ưu tiên:
 
-```bash
-CUDA_VISIBLE_DEVICES=0,1 TRAIN_SEED=42 \
-TEACHER_MODEL_PATH=/absolute/path/Qwen3-4B \
-STUDENT_MODEL_PATH=/absolute/path/Qwen3-1.7B \
-TRAIN_DATA=/absolute/path/competition_math/data/train-00000-of-00001.parquet \
-STORAGE_ROOT=/workspace/storage-shared \
-bash TOPD/scripts/train_compe_math_4b_17b_1epoch.sh
-```
+- `TEACHER_MODEL` → `TEACHER_MODEL_PATH` → `TEACHER_PATH`.
+- `STUDENT_MODEL` → `STUDENT_MODEL_PATH` → `STUDENT_PATH`.
+- `TRAIN_DATA` → `TRAIN_DATA_PATH`; `PROMPT_KEY` → `TRAIN_PROMPT_KEY`.
+- `TRAIN_DATA_SPLIT`, `TRAIN_PREFER_SOURCE_PROMPT`, `STORAGE_ROOT`.
+- `OUTPUT_ROOT`, `RUN_NAME`, `OUTPUT_DIR`, `RESULTS_DIR`, `COMPARISON_NAME`.
 
-Lần chạy thật truy vấn Hugging Face để pin revision và kiểm SHA256 từng official
-safetensors shard; local weights khác official initialization, kể cả Base đã
-đổi tên folder, bị từ chối. Cần mạng cho bước kiểm provenance. Checkpoint đã
-train không được dùng làm khởi tạo mới; dùng resume để tiếp tục run.
+Hai model path mặc định đã được bạn xác nhận: `models/Qwen3-4B` và
+`models/Qwen3-1.7B`, tức `/workspace/storage-shared/models/Qwen3-4B` và
+`/workspace/storage-shared/models/Qwen3-1.7B`. Khi chạy CMT đối chứng, dùng chính
+hai path này. Đường dẫn tuyệt đối được giữ nguyên; đường dẫn tương đối dùng
+storage root. Cặp 8B/Base trong mặc định CMT lịch sử không phải cặp đối chứng này.
+
+Mặc định preflight hoạt động offline: kiểm architecture/tokenizer và ghi SHA256
+của local weights/config/tokenizer. `VERIFY_OFFICIAL_WEIGHTS=true` bật so sánh
+thêm với official Hugging Face LFS metadata, cần mạng nhưng vẫn giữ nguyên local
+path và không tải weights. Không suy diễn local SHA256 thành bằng chứng official
+identity nếu chưa bật kiểm này.
 
 Để kế thừa chính xác cấu hình chung của CMT đối chứng:
 
@@ -78,7 +85,7 @@ BASELINE_CONFIG=/absolute/path/cmt_run/resolved_config.yaml \
 bash TOPD/scripts/train_compe_math_4b_17b_1epoch.sh
 ```
 
-File đó phải dùng cùng official model pair và đúng một epoch. Cấu hình CMT
+File đó phải dùng cùng model pair và đúng một epoch. Cấu hình CMT
 lịch sử 8B/Base/3 epoch sẽ bị từ chối. Không truyền checkpoint CMT đã train
 thành student initialization.
 
@@ -88,17 +95,17 @@ Xem cấu hình mà không tải model hoặc bắt đầu training:
 bash TOPD/scripts/train_compe_math_4b_17b_1epoch.sh --dry-run
 ```
 
-Kết quả preview: `TOPD/outputs/launch_preview.yaml`; đây chỉ là kiểm cấu hình,
+Kết quả preview: `TOPD/results/launch_configs/<RUN_NAME>.yaml`; đây chỉ là kiểm cấu hình,
 không phải preflight xác nhận GPU, dataset, tokenizer hay weights.
 
 ## Output và resume
 
-Mặc định: `TOPD/outputs/topd_compe_math_4b_17b_seed42/`.
+Mặc định: `TOPD/outputs/topd_compe_math_4b_17b_seed42/topd/`.
 
 - `final/`: HF model, tokenizer, generation/config, optimizer và RNG. Checkpoint giữa rollout còn lưu frozen
   main rollout cần cho resume. `checkpoint-000150/` tương tự cho checkpoint giữa chừng.
 - `resolved_config.yaml`, `run_metadata.json`, `preflight.json`: cấu hình,
-  source hashes, official weight hashes, số mẫu sau filter, sampler-order hash.
+  source hashes, local weight hashes và kiểu verification, số mẫu sau filter, sampler-order hash.
 - `comparison_manifest.json`, `cmt_matched_config.yaml`: đối chiếu từng setting
   và config cho run CMT mới nếu chưa cung cấp baseline thật.
 - `topd_metrics.jsonl`: OPD/traj/total loss, candidate/OT/acceptance, token counts,
@@ -135,8 +142,8 @@ Eval dùng `resolved_config.yaml` của run, `final/`, cùng renderer/parser mat
 temperature `.7`, top-p `.95`, 7168 token, 8 responses và seed 1234 theo mặc định
 launcher/config gốc. Nếu có `BASELINE_CONFIG`, dùng các giá trị thực của file đó.
 Suite giữ Competition-MATH, MATH-500, AIME24, AIME25, AMC23 và GPQA-Diamond như gốc.
-`evaluation/summary.json` và các file prediction ghi cả Avg@8/Pass@8 từ cùng tám
-completion. Có thể đặt `TOPD_RUN_DIR`, truyền `--model /path/checkpoint-...`,
+`TOPD/results/<RUN_NAME>/eval/topd/summary.json` và các file prediction ghi cả Avg@8/Pass@8 từ cùng tám
+completion. Có thể đặt `TOPD_RUN_DIR`, `TOPD_CHECKPOINT`, `TOPD_EVAL_OUTPUT`, hoặc truyền `--model /path/checkpoint-...`,
 `--output /new/eval_dir`, `--seed 43` cho re-eval riêng. Các option này thuộc
 `python -m topd.cli evaluate --help`.
 
@@ -144,7 +151,7 @@ Chạy nhiều training seed, chỉ khi muốn chi trả cho ba full run:
 
 ```bash
 for seed in 42 43 44; do
-  CUDA_VISIBLE_DEVICES=0,1 TRAIN_SEED="$seed" DOWNLOAD_MODELS=1 \
+  CUDA_VISIBLE_DEVICES=0,1 TRAIN_SEED="$seed" \
     bash TOPD/scripts/train_compe_math_4b_17b_1epoch.sh
   CUDA_VISIBLE_DEVICES=0,1 TRAIN_SEED="$seed" \
     bash TOPD/scripts/eval_compe_math_4b_17b_1epoch.sh
@@ -160,9 +167,9 @@ Sau khi cả ba run và eval hoàn tất, tổng hợp mean ± sample standard d
 ```bash
 cd TOPD
 python3 -m topd.cli aggregate-seeds \
-  --runs outputs/topd_compe_math_4b_17b_seed42 \
-         outputs/topd_compe_math_4b_17b_seed43 \
-         outputs/topd_compe_math_4b_17b_seed44 \
+  --runs outputs/topd_compe_math_4b_17b_seed42/topd \
+         outputs/topd_compe_math_4b_17b_seed43/topd \
+         outputs/topd_compe_math_4b_17b_seed44/topd \
   --output outputs/topd_training_seeds_summary.json
 ```
 
@@ -203,3 +210,19 @@ Script chạy unit/regression tests, hai CPU process với Gloo, rồi smoke off
 với ba synthetic examples, hai original rollouts/example, future K=50, ba updates,
 OT, student gradients và checkpoint/resume thật. Kết quả JSON nằm ở
 `TOPD/outputs/smoke/smoke_result.json`; chúng không phải kết quả Competition-MATH.
+
+## Path contract khi push lên B200
+
+Xem [B200_PATHS.md](docs/B200_PATHS.md). Chỉ source và config được push; runtime
+`outputs/` và `results/` bị gitignore. Script tạo lại resolved config trên B200,
+không đọc các path preview từ máy kiểm thử. Cấu trúc tương ứng với bản gốc:
+
+```text
+BellmanOPD_analysis/outputs/<RUN_NAME>/cmt_opd/
+TOPD/outputs/<RUN_NAME>/topd/
+BellmanOPD_analysis/results/<RUN_NAME>/eval/cmt_opd/
+TOPD/results/<RUN_NAME>/eval/topd/
+```
+
+`training_eval/`, `tensorboard/`, vLLM logs và checkpoints đều nằm dưới run output
+của phương pháp; shared model/data assets giữ cùng path trên storage B200.

@@ -29,7 +29,7 @@ def model_assets(tmp_path):
 def test_verify_exact_model_bytes_and_pin_commits(tmp_path):
     config, info = model_assets(tmp_path)
     with patch("huggingface_hub.model_info", side_effect=lambda repo, **kwargs: info[repo]):
-        provenance = resolve_official_models(config)
+        provenance = resolve_official_models(config, verify_official=True)
     assert provenance["student"]["source"] == "Qwen/Qwen3-1.7B"
     assert config["topd"]["student_revision"] == "student-pinned-commit"
 
@@ -39,7 +39,26 @@ def test_renamed_base_or_different_initial_weights_rejected(tmp_path):
     (Path(config["models"]["student_path"])/"model.safetensors").write_bytes(b"renamed-base-weights")
     with patch("huggingface_hub.model_info", side_effect=lambda repo, **kwargs: info[repo]):
         with pytest.raises(ValueError, match="weights differ"):
-            resolve_official_models(config)
+            resolve_official_models(config, verify_official=True)
+
+
+def test_b200_local_models_work_offline_without_changing_paths(tmp_path):
+    config, _ = model_assets(tmp_path)
+    original_paths = dict(config["models"])
+    with patch("huggingface_hub.model_info", side_effect=AssertionError("B200 local mode must not use HF")), \
+         patch("huggingface_hub.snapshot_download", side_effect=AssertionError("must never download")):
+        provenance = resolve_official_models(config)
+    assert config["models"] == original_paths
+    assert provenance["student"]["verification"] == "local_checkpoint_sha256"
+    assert provenance["student"]["revision"] is None
+
+
+def test_missing_local_model_raises_before_network_access(tmp_path):
+    config, _ = model_assets(tmp_path)
+    config["models"]["student_path"] = str(tmp_path/"absent")
+    with patch("huggingface_hub.model_info", side_effect=AssertionError("must not query HF")):
+        with pytest.raises(FileNotFoundError, match="existing B200 checkpoint"):
+            resolve_official_models(config, verify_official=True)
 
 
 def test_data_audit_counts_epoch_and_rejects_question_leakage(tmp_path):

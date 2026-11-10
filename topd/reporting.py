@@ -46,7 +46,9 @@ def comparison_manifest(current, reference, *, reference_path, historical=False)
             "Additional compute is measured, not equalized"],
         update_partition="CMT response-index-major in both methods",
         schedule="constant learning rate; no scheduler in source",
-        checkpoint_bytes_verified_against_official_models=bool(current.get("model_provenance")))
+        checkpoint_bytes_verified_against_official_models=all(
+            current.get("model_provenance", {}).get(role, {}).get("verification") == "official_sha256"
+            for role in ("student", "teacher")))
 
 
 def rows(path):
@@ -135,6 +137,12 @@ def compare_runs(topd_output, baseline_output, destination):
 
 def completed_evaluation(root):
     root = Path(root)
+    location = root/"evaluation_location.json"
+    if location.is_file():
+        marker = json.loads(location.read_text())
+        candidate = Path(marker["summary"])
+        if Path(marker["checkpoint"]).resolve() == (root/"final").resolve() and candidate.is_file():
+            return json.loads(candidate.read_text())
     candidate = root/"evaluation/summary.json"
     if candidate.is_file():
         return json.loads(candidate.read_text())
