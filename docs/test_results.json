@@ -3,7 +3,7 @@
   "unit_and_regression_tests": {
     "passed": 98,
     "failed": 0,
-    "elapsed_seconds": 15.26,
+    "elapsed_seconds": 15.74,
     "junit": "docs/test_results.xml"
   },
   "smoke": {
@@ -31,14 +31,14 @@
       "rejected_candidates": 0
     },
     "times": {
-      "prepare_time_sec": 0.6371695343405008,
-      "future_generation_time_sec": 0.6020867088809609,
-      "ot_time_sec": 0.028200448490679264,
-      "trajectory_update_time_sec": 0.012778196483850479
+      "prepare_time_sec": 0.6527243470773101,
+      "future_generation_time_sec": 0.6165808737277985,
+      "ot_time_sec": 0.029121302999556065,
+      "trajectory_update_time_sec": 0.013146135956048965
     },
     "status": "passed",
     "synthetic_only": true,
-    "run_directory": "outputs/smoke/tiny-qwen3-ib6o3ntv",
+    "run_directory": "outputs/smoke/tiny-qwen3-t3sd_58n",
     "mid_rollout_resume_matches_uninterrupted": true,
     "teacher_frozen": true,
     "student_updated": true,
@@ -75,5 +75,16 @@
     "regression_tests": "tests/test_dependencies.py (10 cases)",
     "b200_package_replacement_executed_locally": false,
     "b200_startup_verified": false
+  },
+  "final_only_evaluation": {
+    "training_callbacks": false,
+    "standalone_checkpoint": "final",
+    "evaluation_seeds": [
+      42,
+      43,
+      44
+    ],
+    "fresh_and_legacy_resume_empty_schedule_verified": true,
+    "orchestration_callback_guard_passed": true
   }
 }

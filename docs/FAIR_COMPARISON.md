@@ -25,7 +25,8 @@ claimed as the matched reference for the implementation's requested experiment.
 | PPO clips | .2 / .28, dual clip 3 | same | same |
 | Distributed | FSDP FULL_SHARD, one rank/GPU | same | same |
 | Two-GPU vLLM request capacity | 128/rank, reservation .6, context 5200 | same derivation | same |
-| Save/eval cadence | step 0 eval, every 150 updates, final | same | same |
+| Save cadence | every 150 updates, final | same | same |
+| Eval execution | step 0, every 150 updates, final | standalone final multiseed only | final multiseed; account for any training-time evaluation cost separately |
 | Eval | eight samples, T=.7, p=.95, length 7168 | same | same |
 | Eval seed | 1234 default; runbook also exports 42 | 1234 unless actual config supplied | identical actual value |
 | Token weighting | CMT bounded Gibbs | uniform original OPD + trajectory KL | method difference |
@@ -39,6 +40,11 @@ one-epoch duration and no-test-training constraints still apply. A mismatch
 fails before training. Subsequent `comparison_manifest.json` records each shared
 field and intentional differences. It distinguishes an actual historical config
 from a generated config for a future matched CMT run.
+By user request, TOPD always disables training-time evaluation, including when
+inheriting BASELINE_CONFIG or resuming an older config. The comparison manifest
+records enabled/start/end flags separately from shared configuration equality;
+decoding settings remain checked. Training wall time comparisons must account
+for any extra evaluation callbacks in the CMT run.
 
 The comparison checks configuration equality. An old run lacking weight/data
 attestations cannot prove the bytes used historically just from its path.

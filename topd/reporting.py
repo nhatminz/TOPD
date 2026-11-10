@@ -35,14 +35,26 @@ def get(config, dotted):
 
 
 def comparison_manifest(current, reference, *, reference_path, historical=False):
-    rows = [{"setting": key, "baseline": get(reference, key), "topd": get(current, key),
-             "identical": get(current, key) == get(reference, key)} for key in SHARED_KEYS]
+    # Standalone final evaluation replaces training-time callbacks by request.
+    # Record that schedule difference separately while comparing all decoding,
+    # data and optimization settings as before.
+    schedule_keys = ("enabled", "eval_at_start", "eval_at_end")
+    def shared_value(config, key):
+        value = get(config, key)
+        if key == "training_evaluation" and isinstance(value, dict):
+            return {name: item for name, item in value.items() if name not in schedule_keys}
+        return value
+    rows = [{"setting": key, "baseline": shared_value(reference, key), "topd": shared_value(current, key),
+             "identical": shared_value(current, key) == shared_value(reference, key)} for key in SHARED_KEYS]
     return dict(reference_path=str(reference_path), historical_run_supplied=historical,
         matched=all(row["identical"] for row in rows), settings=rows,
-        match_scope="configuration equality; historical weight/data bytes need prior attestations",
+        training_evaluation_schedule={name: {key: get(config, f"training_evaluation.{key}")
+            for key in schedule_keys} for name, config in (("baseline", reference), ("topd", current))},
+        match_scope="configuration equality excluding recorded training-evaluation enable/start/end flags; historical weight/data bytes need prior attestations",
         prior_initialization_attested=bool(historical and reference.get("model_provenance")),
         intentional_differences=["CMT Gibbs token weighting versus uniform OPD + TOPD trajectory guidance",
             "TOPD independently generated teacher/student futures and OT",
+            "TOPD disables training-evaluation callbacks and evaluates final separately",
             "Additional compute is measured, not equalized"],
         update_partition="CMT response-index-major in both methods",
         schedule="constant learning rate; no scheduler in source",

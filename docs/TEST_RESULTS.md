@@ -1,6 +1,6 @@
 # Validation results — 2026-11-10
 
-**98 tests passed, 0 failed (15.26 seconds)**. Machine-readable evidence:
+**98 tests passed, 0 failed (15.74 seconds)**. Machine-readable evidence:
 [`test_results.xml`](test_results.xml), [`test_results.json`](test_results.json).
 No full training or benchmark accuracy evaluation was started.
 
@@ -143,3 +143,15 @@ metadata with the selected interpreter. The suite now has 98 passing tests.
 No FlashInfer wheel was installed or replaced in the CPU verification environment.
 The B200 repair command is supplied in `B200_STARTUP.md`; successful production
 startup remains to be verified on that server after replacing the mismatched wheel.
+
+## Continuous training followed by final multiseed evaluation
+
+The default config and launcher disable all training-evaluation callbacks, even
+when importing an enabled baseline config or resuming an older run. Existing
+orchestration coverage now fails if a training evaluation callback is invoked;
+baseline inheritance coverage verifies that decoding seeds remain inherited
+while evaluation execution is disabled and recorded separately in the comparison.
+The full suite remains at 98 passing tests. Manual configuration checks verified
+an empty evaluation schedule for fresh and old-config resumed launches, with
+resume scientific-setting validation passing. The standalone final multiseed
+planning/aggregation checks remain passing. No production training was started.

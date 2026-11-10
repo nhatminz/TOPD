@@ -20,5 +20,15 @@
   "local_models_only": true,
   "automatic_model_download": false,
   "production_requires_b200": true,
-  "model_pair_note": "User confirmed models/Qwen3-4B and models/Qwen3-1.7B; resolved under STORAGE_ROOT."
+  "model_pair_note": "User confirmed models/Qwen3-4B and models/Qwen3-1.7B; resolved under STORAGE_ROOT.",
+  "training_evaluation_enabled": false,
+  "standalone_multiseed": {
+    "checkpoint": "final",
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "benchmarks": 6
+  }
 }

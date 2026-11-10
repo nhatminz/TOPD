@@ -96,6 +96,11 @@ The user subsequently confirmed the B200 model paths `models/Qwen3-4B` and
 `models/Qwen3-1.7B`, both relative to `/workspace/storage-shared`. These are the
 active TOPD defaults and the required CMT comparison overrides. Shared dataset
 paths and resolver semantics remain those of the original B200 project.
+The user subsequently requested continuous training followed by final-checkpoint
+multiseed evaluation. TOPD disables all training-evaluation callbacks, including
+for baseline-derived and resumed configs, and records this execution-schedule
+difference in its comparison manifest. Standalone decoding/parser settings stay
+unchanged; periodic checkpoint saves remain available for resume.
 
 Only `trainer.py`, `resume.py`, `evaluation.py`, and `vllm_rollout.py` differ from their audited
 copies. The trainer adds TOPD hooks, CMT group membership for TOPD, exact

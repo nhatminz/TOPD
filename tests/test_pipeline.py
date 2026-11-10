@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 import torch
 
-from b200_experiment.config import load_config, save_config
+from b200_experiment.config import load_config, resolve_runtime_paths, save_config
 from b200_experiment.data import build_response_valid_mask, epoch_batch_indices
 from b200_experiment.distributed import (
     DistributedContext, grouped_ppo_minibatch_partition, padded_local_indices,
@@ -106,6 +106,7 @@ def test_resume_rejects_changed_topd_objective(tmp_path):
 def test_actual_baseline_configuration_owns_shared_settings(tmp_path, monkeypatch):
     reference = load_config(ROOT/"configs/topd_compe_math.yaml")
     reference["experiment"]["method"] = "cmt"
+    reference["training_evaluation"].update(enabled=True, eval_at_start=True, eval_at_end=True)
     reference["training_evaluation"]["vllm"]["seed"] = 42
     reference["evaluation"]["vllm"]["seed"] = 43
     reference["rollout"]["seed"] = 17
@@ -118,6 +119,11 @@ def test_actual_baseline_configuration_owns_shared_settings(tmp_path, monkeypatc
     assert config["training_evaluation"]["vllm"]["seed"] == 42
     assert config["evaluation"]["vllm"]["seed"] == 43
     assert config["rollout"]["seed"] == 17
+    assert config["training_evaluation"]["enabled"] is False
+    from topd.reporting import comparison_manifest
+    comparison = comparison_manifest(config, resolve_runtime_paths(reference), reference_path=saved)
+    assert comparison["matched"]
+    assert comparison["training_evaluation_schedule"]["baseline"]["enabled"] is True
 
 
 def test_near_future_generation_starts_at_prefix_and_stops_at_eos():
@@ -256,6 +262,7 @@ def test_actual_training_orchestration_with_tiny_models(tmp_path, monkeypatch):
     monkeypatch.setattr(trainer, "load_models", lambda c, device: (student, teacher, tokenizer,
         {"student_path": c["models"]["student_path"], "teacher_path": c["models"]["teacher_path"]}))
     monkeypatch.setattr(trainer, "collect_metadata", lambda *args: {})
+    monkeypatch.setattr(trainer, "_run_training_evaluation", lambda *a, **kw: pytest.fail("training must not evaluate"))
     for name in ("reset_peak_memory_stats", "max_memory_allocated", "max_memory_reserved"):
         monkeypatch.setattr(torch.cuda, name, lambda *args: 0)
     summary = trainer.run_training(config)

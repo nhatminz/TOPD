@@ -13,7 +13,7 @@ if (( $# != 0 )); then
 fi
 "${PYTHON_BIN}" -m topd.cli prepare --output "${TOPD_LAUNCH_CONFIG}"
 TOPD_GPU_COUNT="$("${PYTHON_BIN}" -c 'import torch; print(torch.cuda.device_count())')"
-echo "TOPD: ${TOPD_GPU_COUNT} visible GPUs, teacher Qwen3-4B, student Qwen3-1.7B, one complete epoch."
+echo "TOPD: ${TOPD_GPU_COUNT} visible GPUs, teacher Qwen3-4B, student Qwen3-1.7B, one complete epoch; training-time evaluation disabled."
 if (( TOPD_GPU_COUNT == 1 )); then
   "${PYTHON_BIN}" -m topd.cli train --config "${TOPD_LAUNCH_CONFIG}"
 else

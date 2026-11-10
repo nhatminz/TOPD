@@ -55,6 +55,9 @@ bash TOPD/scripts/train_compe_math_4b_17b_1epoch.sh
 Script tự đếm GPU thật nhìn thấy bởi PyTorch và dùng một FSDP rank/GPU qua
 `torch.distributed.run`. Không thay `CUDA_VISIBLE_DEVICES`. Nếu mask yêu cầu
 hai GPU nhưng chỉ nhìn thấy một GPU, script dừng trước khi tải model.
+Train chạy liên tục hết một epoch, không eval ở step 0, giữa các step hoặc
+trong callback cuối train. Sau khi lưu `final/`, chạy eval multiseed riêng.
+Quy tắc này cũng áp dụng khi dùng `BASELINE_CONFIG` hoặc resume config cũ.
 
 Các đường dẫn mặc định dưới `STORAGE_ROOT`:
 
@@ -128,7 +131,8 @@ Mặc định: `TOPD/outputs/topd_compe_math_4b_17b_seed42/topd/`.
 - `topd_summary.json`: kiểm tra mỗi `(example,response)` đúng một lần, coverage 1.0.
 - `metrics.jsonl`, `training_cost*.json*`, `training_sessions.jsonl`, TensorBoard:
   diagnostics chung và chi phí thực đo; không giả định overhead 1.41×.
-- `training_eval/`, `eval_history*.jsonl`: evaluation theo lịch gốc.
+- `training_eval/`, `eval_history*.jsonl` có thể tồn tại từ run cũ; các lần train
+  mới không chạy evaluation callback.
 
 Resume cùng output, seed, GPU layout và config:
 
@@ -145,6 +149,22 @@ không được resume để chạy thêm epoch. Rollback checkpoint cũ xóa lo
 chưa commit sau checkpoint, dùng cơ chế rewind có sẵn của pipeline.
 
 ## Eval và so sánh
+
+Luồng mặc định là **train xong → eval multiseed checkpoint final**. Ví dụ tại
+thư mục `TOPD/`, sau khi chuẩn bị dependencies:
+
+```bash
+export CUDA_VISIBLE_DEVICES=0,1 TRAIN_SEED=42
+export RUN_NAME=topd_compe_math_4b_17b_seed42_finalonly
+bash scripts/train_compe_math_4b_17b_1epoch.sh && \
+  bash scripts/eval_multiseed_b200.sh
+```
+
+Eval chỉ bắt đầu khi train kết thúc thành công; mặc định eval `final` trên sáu
+dataset với ba evaluation seed `42 43 44`. Checkpoint định kỳ vẫn được lưu để
+resume; chúng không kích hoạt eval.
+
+Nếu cần eval một seed hoặc so sánh với CMT:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0,1 \

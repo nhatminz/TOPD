@@ -201,6 +201,9 @@ def launch_config():
         local_trajectories = math.ceil(c["rollout"]["batch_size"]*c["rollout"]["num_responses"]/visible)
         c["rollout"]["vllm"].update(max_num_seqs=local_trajectories,
             max_concurrent_requests=local_trajectories, return_log_probs=False)
+    # User-requested execution schedule also overrides inherited baseline and
+    # older resume configs. Keep the decoding protocol for standalone eval.
+    c["training_evaluation"].update(enabled=False, eval_at_start=False, eval_at_end=False)
     c = resolve_runtime_paths(c)
     validate_config(c)
     return c

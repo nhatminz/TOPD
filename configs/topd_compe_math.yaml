@@ -15,6 +15,12 @@ training:
   epochs: 1
   max_steps: null
 
+# Train continuously; run scripts/eval_multiseed_b200.sh on final/ afterward.
+training_evaluation:
+  enabled: false
+  eval_at_start: false
+  eval_at_end: false
+
 topd:
   enabled: true
   teacher_source: Qwen/Qwen3-4B
