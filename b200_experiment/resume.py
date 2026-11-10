@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import gzip
 import json
+import random
 import re
 import shutil
 import uuid
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
+import numpy as np
 import yaml
 
 from .fsdp import is_fsdp_model, scatter_full_optimizer_state_dict
@@ -97,6 +99,12 @@ def _cpu_byte_rng_state(value: Any, name: str) -> torch.Tensor:
 
 
 def _restore_rng_states(payload: dict[str, Any], device: torch.device) -> None:
+    if "python_rng_state" in payload:
+        random.setstate(payload["python_rng_state"])
+    if "numpy_rng_state" in payload:
+        state = payload["numpy_rng_state"]
+        np.random.set_state((state["generator"], state["keys"].cpu().numpy().astype(np.uint32),
+                             state["position"], state["has_gauss"], state["cached_gaussian"]))
     if "torch_rng_state" in payload:
         torch.set_rng_state(
             _cpu_byte_rng_state(payload["torch_rng_state"], "torch_rng_state")
@@ -503,6 +511,7 @@ def restore_optimizer(
             ]
             _restore_rng_states(
                 {
+                    **rank_state,
                     "torch_rng_state": rank_state["torch_rng_state"],
                     "cuda_rng_state_all": [rank_state["cuda_rng_state"]],
                 },
@@ -544,7 +553,11 @@ def restore_optimizer(
         for key, item in state.items():
             if torch.is_tensor(item):
                 state[key] = item.to(device)
-    _restore_rng_states(payload, device)
+    rng_states = payload.get("rng_states")
+    if rng_states:
+        _restore_rng_states({**rng_states[0], "cuda_rng_state_all": [rng_states[0]["cuda_rng_state"]]}, device)
+    else:
+        _restore_rng_states(payload, device)
     return ResumeState(checkpoint, optimizer_path, step)
 
 

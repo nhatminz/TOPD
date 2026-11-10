@@ -6,11 +6,15 @@ this module changes the common OPD objective.
 from __future__ import annotations
 
 import math
+from functools import lru_cache
+from threading import Lock
 from dataclasses import dataclass
 
 import numpy as np
 import torch
 import torch.nn.functional as F
+
+_LINEAR_PROGRAM_LOCK = Lock()
 
 
 def select_candidates(losses, valid_mask, *, fraction=0.0225, budget=None,
@@ -75,6 +79,17 @@ def cosine_ground_cost(student_vectors, teacher_vectors):
     return (1 - F.normalize(s, dim=-1) @ F.normalize(t, dim=-1).T).clamp(0, 2)
 
 
+@lru_cache(maxsize=2500)
+def uniform_transport_constraints(n, m):
+    """Reuse immutable sparse equality structure for the same window lengths."""
+    from scipy.sparse import coo_matrix
+    cells = np.arange(n*m)
+    constraint = coo_matrix((np.ones(2*n*m),
+        (np.concatenate((np.repeat(np.arange(n), m), n + np.tile(np.arange(m), n))),
+         np.concatenate((cells, cells)))), shape=(n+m, n*m)).tocsr()
+    return constraint, np.r_[np.full(n, 1/n), np.full(m, 1/m)]
+
+
 def solve_transport(cost, *, solver="exact", epsilon=0.05,
                     max_iterations=10000, tolerance=1e-7):
     """Uniform balanced OT. Exact assignment if square, HiGHS LP otherwise.
@@ -91,19 +106,18 @@ def solve_transport(cost, *, solver="exact", epsilon=0.05,
     a, b = torch.full((n,), 1/n, dtype=torch.float64), torch.full((m,), 1/m, dtype=torch.float64)
     if solver == "exact":
         from scipy.optimize import linear_sum_assignment, linprog
-        from scipy.sparse import coo_matrix
         if n == m:
             rows, cols = linear_sum_assignment(c.numpy())
             plan = torch.zeros_like(c)
             plan[rows, cols] = 1/n
         else:
-            cells = np.arange(n*m)
-            constraint = coo_matrix((np.ones(2*n*m),
-                (np.concatenate((np.repeat(np.arange(n), m), n + np.tile(np.arange(m), n))),
-                 np.concatenate((cells, cells)))), shape=(n+m, n*m)).tocsr()
-            answer = linprog(c.numpy().reshape(-1), A_eq=constraint,
-                b_eq=np.r_[a.numpy(), b.numpy()], bounds=(0, None), method="highs",
-                options={"maxiter": int(max_iterations), "primal_feasibility_tolerance": max(1e-10, tolerance)})
+            constraint, marginal = uniform_transport_constraints(n, m)
+            # HiGHS has its own scheduler; avoid nested independent schedulers
+            # when square assignment/cost work runs in the outer thread pool.
+            with _LINEAR_PROGRAM_LOCK:
+                answer = linprog(c.numpy().reshape(-1), A_eq=constraint,
+                    b_eq=marginal, bounds=(0, None), method="highs",
+                    options={"maxiter": int(max_iterations), "primal_feasibility_tolerance": max(1e-10, tolerance)})
             if not answer.success:
                 raise RuntimeError(f"Exact OT failed: {answer.message}")
             plan = torch.from_numpy(answer.x.reshape(n, m))
@@ -170,6 +184,59 @@ def forward_kl(logits, target: SparseTargets, mask=None, *, temperature=1.0):
     if not torch.isfinite(loss).all():
         raise FloatingPointError("Nonfinite forward trajectory KL")
     return loss
+
+
+class _ChunkedSparseKL(torch.autograd.Function):
+    """Exact FP32 forward KL, recomputing softmax in backward in bounded chunks.
+
+    Save BF16 logits and tiny sparse targets, not a full FP32 vocabulary-sized
+    activation for every window. This changes memory/scheduling only.
+    """
+    @staticmethod
+    def forward(ctx, logits, ids, probabilities, temperature, chunk_size):
+        result = logits.new_empty(logits.shape[0], dtype=torch.float32)
+        for begin in range(0, logits.shape[0], chunk_size):
+            end = begin+chunk_size
+            values = logits[begin:end].float()/temperature
+            p = probabilities[begin:end]
+            log_p = values.gather(1, ids[begin:end]) - values.logsumexp(-1, keepdim=True)
+            result[begin:end] = torch.special.xlogy(p, p).sum(-1) - (p*log_p).sum(-1)
+        ctx.save_for_backward(logits, ids, probabilities)
+        ctx.temperature, ctx.chunk_size = temperature, chunk_size
+        return result
+
+    @staticmethod
+    def backward(ctx, gradient):
+        logits, ids, probabilities = ctx.saved_tensors
+        result = torch.empty_like(logits)
+        for begin in range(0, logits.shape[0], ctx.chunk_size):
+            end = begin+ctx.chunk_size
+            p = probabilities[begin:end]
+            values = (logits[begin:end].float()/ctx.temperature).softmax(-1)
+            # Account for the exact represented row mass, including FP32 roundoff.
+            values.mul_(p.sum(-1, keepdim=True))
+            values.scatter_add_(1, ids[begin:end], -p)
+            values.mul_(gradient[begin:end, None]/ctx.temperature)
+            result[begin:end] = values.to(logits.dtype)
+        return result, None, None, None, None
+
+
+def batched_forward_kl(logits, targets, *, temperature=1., chunk_size=32):
+    """Sum KL over valid positions of ragged windows, with detached sparse rows."""
+    if temperature <= 0 or chunk_size <= 0:
+        raise ValueError("KL temperature/chunk size must be positive")
+    width = max(target.token_ids.numel() for target in targets)
+    values, ids, probabilities = [], [], []
+    for index, target in enumerate(targets):
+        length = target.probabilities.shape[0]
+        values.append(logits[index, :length])
+        ids.append(F.pad(target.token_ids, (0, width-target.token_ids.numel())).expand(length, -1))
+        probabilities.append(F.pad(target.probabilities.detach(), (0, width-target.token_ids.numel())))
+    losses = _ChunkedSparseKL.apply(torch.cat(values), torch.cat(ids).to(logits.device),
+        torch.cat(probabilities).to(logits.device), float(temperature), int(chunk_size))
+    if not bool(torch.isfinite(losses).all()):
+        raise FloatingPointError("Nonfinite forward trajectory KL")
+    return losses.sum()
 
 
 def divergence_mask(distances, *, mode="percentile", quantile=0.3,

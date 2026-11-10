@@ -30,5 +30,20 @@
       44
     ],
     "benchmarks": 6
+  },
+  "throughput_dry_run": {
+    "status": "configuration_only",
+    "assets_verified": false,
+    "run_name": "topd_b200_throughput_seed42",
+    "save_interval": 20,
+    "future_backend": "shared_prefix",
+    "generation_batch_size": "auto",
+    "loss_micro_batch_size": "auto",
+    "teacher": "/workspace/storage-shared/models/Qwen3-4B",
+    "student": "/workspace/storage-shared/models/Qwen3-1.7B",
+    "training_data": "/workspace/storage-shared/nlp/minhpn19/data/competition_math/data/train-00000-of-00001.parquet",
+    "epochs": 1,
+    "seed": 42,
+    "training_evaluation_enabled": false
   }
 }

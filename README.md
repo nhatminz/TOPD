@@ -11,6 +11,10 @@ Cần run CMT cùng cấu hình hoặc cung cấp `BASELINE_CONFIG` của run đ
 Xem [audit](docs/BASELINE_AUDIT.md), [phương pháp](docs/TOPD_METHOD.md),
 [các giả định](docs/PAPER_AMBIGUITIES.md), [fair comparison](docs/FAIR_COMPARISON.md)
 và [kết quả kiểm thử](docs/TEST_RESULTS.md).
+Tối ưu throughput, profiling và benchmark B200: [PERFORMANCE.md](docs/PERFORMANCE.md).
+Future generation dùng shared-prefix KV và gather FSDP một lần/model/update;
+generation/backward chọn microbatch theo VRAM. Mặc định lưu checkpoint mỗi **20**
+optimizer step. Speedup trên B200 chưa được đo ở máy kiểm thử CPU này.
 
 ## Môi trường
 
@@ -121,7 +125,9 @@ không phải preflight xác nhận GPU, dataset, tokenizer hay weights.
 Mặc định: `TOPD/outputs/topd_compe_math_4b_17b_seed42/topd/`.
 
 - `final/`: HF model, tokenizer, generation/config, optimizer và RNG. Checkpoint giữa rollout còn lưu frozen
-  main rollout cần cho resume. `checkpoint-000150/` tương tự cho checkpoint giữa chừng.
+  main rollout cần cho resume. `checkpoint-000020/`, `checkpoint-000040/`, …
+  được giữ riêng, không ghi đè. Mỗi checkpoint có optimizer, RNG và metadata;
+  `SAVE_INTERVAL=20` là mặc định và được nhận qua launcher.
 - `resolved_config.yaml`, `run_metadata.json`, `preflight.json`: cấu hình,
   source hashes, local weight hashes và kiểu verification, số mẫu sau filter, sampler-order hash.
 - `comparison_manifest.json`, `cmt_matched_config.yaml`: đối chiếu từng setting
@@ -249,8 +255,14 @@ accuracy vào bảng khi tìm thấy evaluation đã chạy ở cả hai phươn
 | `TOPD_LAMBDA` | `.01`, nhân loss trajectory đã reduce |
 | `TOPD_NORMALIZATION` | `window_mean_sum`; thêm `token_mean`, `sum`, `original_token_mean` |
 | `TOPD_OT_SOLVER` | `exact`; có thể `sinkhorn` (xấp xỉ entropy, được log) |
-| `TOPD_GENERATION_BATCH_SIZE` | `4` prefixes/lần sinh future |
-| `TOPD_LOSS_MICRO_BATCH_SIZE` | `1` future window/lần backward |
+| `TOPD_GENERATION_BATCH_SIZE` | `auto`, giới hạn bởi VRAM/token budget |
+| `TOPD_LOSS_MICRO_BATCH_SIZE` | `auto`, không đổi batch hiệu dụng |
+| `TOPD_GENERATION_MAX_BATCH_SIZE` | `64` |
+| `TOPD_LOSS_MAX_BATCH_SIZE` | `32` |
+| `TOPD_GENERATION_TOKEN_BUDGET` | `131072` padded tokens |
+| `TOPD_LOSS_TOKEN_BUDGET` | `65536` padded tokens |
+| `TOPD_PROFILE_STEPS` | ví dụ `2,3`, ghi Chrome/NCCL traces hữu hạn |
+| `SAVE_INTERVAL` | `20`, checkpoint đầy đủ mỗi 20 optimizer step |
 | `MICRO_BATCH_SIZE_PER_GPU` | `16`, giữ global PPO batch 64 |
 | `SCORE_MICRO_BATCH_SIZE` | `8` |
 | `FSDP_TEACHER_CPU_OFFLOAD` | `false`, tùy chọn offload teacher có sẵn trong pipeline |

@@ -102,7 +102,7 @@ for baseline-derived and resumed configs, and records this execution-schedule
 difference in its comparison manifest. Standalone decoding/parser settings stay
 unchanged; periodic checkpoint saves remain available for resume.
 
-Only `trainer.py`, `resume.py`, `evaluation.py`, and `vllm_rollout.py` differ from their audited
+Only `trainer.py`, `resume.py`, `scoring.py`, `evaluation.py`, and `vllm_rollout.py` differ from their audited
 copies. The trainer adds TOPD hooks, CMT group membership for TOPD, exact
 mid-rollout persistence, explicit coverage/cost metadata, and masked
 collective-only execution when a tail rank has no real row. Empty CUDA RNG
@@ -114,6 +114,13 @@ The rollout adaptation invokes the installed vLLM console entry point with the
 trainer's Python instead of resolving a foreign venv's executable from PATH,
 pins the child's PYTHON_EXEC, and retains earlier engine-worker errors in
 startup failure messages. Serving/sampling/weight-transfer options are unchanged.
+The throughput follow-up changes the two scoring entrypoint decorators from
+inference_mode to no_grad so FSDP work buffers remain safe for later unshard and
+backward. Tests normalize this decorator substitution and verify that every
+scoring arithmetic byte still matches the source. The trainer supports deferred
+gradient synchronization, phase/operator profiling and complete interval-20
+checkpoints. TOPD's generation and KL optimizations are described and bounded
+by numerical checks in `PERFORMANCE.md`; the original OPD core stays unchanged.
 
 Original source files remain unchanged; `source_manifest.json` records the
 inspected bytes, and `FILES_CREATED.md` lists the standalone implementation.

@@ -370,7 +370,7 @@ def _gather_with_scaled_normalizers(
     return torch.cat(chunks, dim=1)
 
 
-@torch.inference_mode()
+@torch.no_grad()
 def score_original_rollout(
     model,
     rollout: RolloutBatch,
@@ -492,7 +492,7 @@ def score_original_rollout(
     )
 
 
-@torch.inference_mode()
+@torch.no_grad()
 def score_student_teacher_rollout(
     student,
     teacher,

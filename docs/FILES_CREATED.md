@@ -8,6 +8,7 @@ are excluded.
 
 - `b200_experiment/evaluation.py`
 - `b200_experiment/resume.py`
+- `b200_experiment/scoring.py`
 - `b200_experiment/trainer.py`
 - `b200_experiment/vllm_rollout.py`
 
@@ -76,6 +77,7 @@ are excluded.
 - `docs/FAIR_COMPARISON.md`
 - `docs/FILES_CREATED.md`
 - `docs/PAPER_AMBIGUITIES.md`
+- `docs/PERFORMANCE.md`
 - `docs/TEST_RESULTS.md`
 - `docs/TOPD_METHOD.md`
 - `docs/entrypoint_checks.json`
@@ -84,6 +86,7 @@ are excluded.
 - `docs/test_results.json`
 - `docs/test_results.xml`
 - `requirements.txt`
+- `scripts/benchmark_b200.sh`
 - `scripts/common_b200.sh`
 - `scripts/compare_with_baseline.sh`
 - `scripts/eval_compe_math_4b_17b_1epoch.sh`
@@ -97,25 +100,30 @@ are excluded.
 - `tests/test_b200_runtime.py`
 - `tests/test_dependencies.py`
 - `tests/test_distributed_topd.py`
+- `tests/test_fsdp_throughput.py`
 - `tests/test_multiseed_topd.py`
 - `tests/test_pipeline.py`
 - `tests/test_preparation.py`
 - `tests/test_reference_opd_core.py`
 - `tests/test_reference_scoring.py`
 - `tests/test_reporting.py`
+- `tests/test_throughput.py`
 - `topd/__init__.py`
 - `topd/algorithm.py`
+- `topd/benchmark.py`
 - `topd/checkpoint.py`
 - `topd/cli.py`
 - `topd/configuration.py`
 - `topd/dependencies.py`
 - `topd/engine.py`
+- `topd/generation.py`
+- `topd/profiling.py`
 - `topd/reporting.py`
+- `topd/runtime.py`
 - `topd/smoke.py`
 
 The two qwen3_b200 config copies and two reference test copies remain unchanged.
-The standalone B200 helper accepts the original model/data/path aliases and pins
-torchrun to the selected Python. The rollout adaptation changes interpreter
-selection and failure diagnostics; sampling and IPC flags are preserved.
-The explicit FlashInfer repair script aligns the cubin wheel with the installed
-flashinfer-python; train/eval check metadata without installing packages.
+Scoring changes only its two inference_mode decorators to no_grad for FSDP
+buffer safety; numerical scoring and original OPD arithmetic remain unchanged.
+Throughput changes, profiling/benchmarking and interval-20 complete checkpoints
+are described with validation and hardware limits in PERFORMANCE.md.

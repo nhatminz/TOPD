@@ -60,7 +60,7 @@ def smoke_config(output):
         fused_optimizer=False, gradient_checkpointing=False, learning_rate=1e-3)
     config["topd"].update(candidate_fraction=1., candidate_budget=1,
         future_window=50, future_seed=1000042, generation_batch_size=2,
-        loss_micro_batch_size=1, divergence_mode="absolute", ot_threshold=0.)
+        loss_micro_batch_size=1, divergence_mode="absolute", ot_threshold=0., ot_workers=1)
     config["training_evaluation"]["enabled"] = False
     return config
 

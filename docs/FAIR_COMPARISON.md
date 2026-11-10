@@ -25,7 +25,7 @@ claimed as the matched reference for the implementation's requested experiment.
 | PPO clips | .2 / .28, dual clip 3 | same | same |
 | Distributed | FSDP FULL_SHARD, one rank/GPU | same | same |
 | Two-GPU vLLM request capacity | 128/rank, reservation .6, context 5200 | same derivation | same |
-| Save cadence | every 150 updates, final | same | same |
+| Save cadence | every 150 updates, final | every 20 updates plus final | match every 20 for comparable I/O cost |
 | Eval execution | step 0, every 150 updates, final | standalone final multiseed only | final multiseed; account for any training-time evaluation cost separately |
 | Eval | eight samples, T=.7, p=.95, length 7168 | same | same |
 | Eval seed | 1234 default; runbook also exports 42 | 1234 unless actual config supplied | identical actual value |
@@ -69,7 +69,7 @@ This config becomes available after TOPD asset preparation; the command is not
 run automatically. Alternatively use the original launcher with explicit values:
 
 ```bash
-CUDA_VISIBLE_DEVICES=0,1 NUM_EPOCHS=1 SEED=42 ROLLOUT_SEED=42 \
+CUDA_VISIBLE_DEVICES=0,1 NUM_EPOCHS=1 SEED=42 ROLLOUT_SEED=42 SAVE_INTERVAL=20 \
 TEACHER_MODEL=models/Qwen3-4B \
 STUDENT_MODEL=models/Qwen3-1.7B \
 STORAGE_ROOT=/workspace/storage-shared \

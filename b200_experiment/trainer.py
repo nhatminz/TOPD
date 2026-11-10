@@ -1929,6 +1929,18 @@ def _opd_train_step(
     for ppo_index in range(offset, min(ppo_count, offset + remaining_limit)):
         cuda_sync(device)
         minibatch_started = time.perf_counter()
+        topd_clock = topd_profile = None
+        if trajectory_engine is not None:
+            from topd.profiling import PhaseClock, UpdateProfiler
+            topd_clock = PhaseClock(device)
+            topd_profile = UpdateProfiler(config["topd"], optimizer_step_start+len(minibatch_metrics)+1,
+                distributed.rank, trajectory_engine.output_dir, device)
+            if device.type == "cuda":
+                trajectory_engine.rollout_peak_allocated = max(getattr(trajectory_engine, "rollout_peak_allocated", 0),
+                    torch.cuda.max_memory_allocated(device))
+                trajectory_engine.rollout_peak_reserved = max(getattr(trajectory_engine, "rollout_peak_reserved", 0),
+                    torch.cuda.max_memory_reserved(device))
+                torch.cuda.reset_peak_memory_stats(device)
         # PPO_MINI_BATCH_SIZE is global. CMT uses response-index-major groups;
         # other methods retain the deterministic rank-interleaved order.
         if grouped_ids is None:
@@ -1965,6 +1977,9 @@ def _opd_train_step(
                 objective_valid, optimizer_step_start + len(minibatch_metrics) + 1)
             model.train()
             unwrap_model(model).config.use_cache = False
+            may_skip_sync = hasattr(model, "no_sync") and trajectory_engine.accumulate_no_sync
+        defer_opd_sync = (trajectory_engine is not None and may_skip_sync
+                         and trajectory_engine.metrics["accepted_candidates"] > 0)
         padded_count = distributed.max_int(len(local_indices))
         filler = int(response_lengths.argmin().item()) if local_batch_size else 0
         row_active = [True] * len(local_indices)
@@ -2090,12 +2105,15 @@ def _opd_train_step(
         for chunk_index, (chunk_indices, chunk_active) in enumerate(
             zip(micro_indices, micro_active)
         ):
-            synchronize = chunk_index == len(micro_indices) - 1
+            synchronize = chunk_index == len(micro_indices) - 1 and not defer_opd_sync
             sync_context = (
                 model.no_sync() if not synchronize and may_skip_sync else nullcontext()
             )
             with sync_context:
-                cuda_sync(device)
+                if topd_clock is not None:
+                    topd_clock.start("opd_forward")
+                else:
+                    cuda_sync(device)
                 started = time.perf_counter()
                 local_width = int(
                     response_lengths.index_select(0, chunk_indices).max().item()
@@ -2204,13 +2222,22 @@ def _opd_train_step(
                     else 0.0
                 )
                 loss = local_numerator * normalizer
-                cuda_sync(device)
+                if topd_clock is not None:
+                    topd_clock.stop("opd_forward")
+                else:
+                    cuda_sync(device)
                 forward_seconds += time.perf_counter() - started
                 finite_or_raise("OPD loss", loss.detach().reshape(1))
-                cuda_sync(device)
+                if topd_clock is not None:
+                    topd_clock.start("opd_backward")
+                else:
+                    cuda_sync(device)
                 started = time.perf_counter()
                 loss.backward()
-                cuda_sync(device)
+                if topd_clock is not None:
+                    topd_clock.stop("opd_backward")
+                else:
+                    cuda_sync(device)
                 backward_seconds += time.perf_counter() - started
                 loss_value += float(loss.detach().item())
                 del (
@@ -2230,12 +2257,18 @@ def _opd_train_step(
         if trajectory_engine is not None:
             trajectory_metrics = trajectory_engine.backward(rollout,
                 optimizer_step_start + len(minibatch_metrics) + 1)
+        cuda_sync(device)
+        clip_started = time.perf_counter()
         gradient_norm = clip_grad_norm(model, float(training.get("max_grad_norm", 1.0)))
         cuda_sync(device)
+        clip_seconds = time.perf_counter()-clip_started
         started = time.perf_counter()
         optimizer.step()
         cuda_sync(device)
         optimizer_seconds = time.perf_counter() - started
+        if topd_clock is not None:
+            forward_seconds = topd_clock.seconds("opd_forward")
+            backward_seconds = topd_clock.seconds("opd_backward")
         optimizer.zero_grad(set_to_none=True)
         global_loss = distributed.sum_float(loss_value) / distributed.world_size
         global_base_loss_sum = distributed.sum_float(base_loss_sum)
@@ -2307,8 +2340,12 @@ def _opd_train_step(
         if trajectory_engine is not None:
             trajectory_metrics.update(
                 opd_update_time_sec=distributed.max_float(forward_seconds + backward_seconds + optimizer_seconds),
+                original_opd_forward_time_sec=distributed.max_float(forward_seconds),
+                original_opd_backward_time_sec=distributed.max_float(backward_seconds),
+                gradient_clip_time_sec=distributed.max_float(clip_seconds),
                 optimizer_time_sec=distributed.max_float(optimizer_seconds),
                 optimizer_update_wall_time_sec=distributed.max_float(time.perf_counter() - minibatch_started),
+                **topd_profile.finish(),
             )
             trajectory_metrics = trajectory_engine.record(global_optimizer_step,
                 global_loss, float(gradient_norm.detach()))
@@ -2465,6 +2502,14 @@ def _save_checkpoint(
             )
             local_rng = {
                 "torch_rng_state": torch.get_rng_state().cpu(),
+                "python_rng_state": random.getstate(),
+                "numpy_rng_state": {
+                    "generator": np.random.get_state()[0],
+                    "keys": torch.tensor(np.random.get_state()[1].astype(np.int64)),
+                    "position": int(np.random.get_state()[2]),
+                    "has_gauss": int(np.random.get_state()[3]),
+                    "cached_gaussian": float(np.random.get_state()[4]),
+                },
                 "cuda_rng_state": (torch.cuda.get_rng_state(distributed.device).cpu()
                     if distributed.device.type == "cuda" else torch.empty(0, dtype=torch.uint8)),
             }
@@ -2487,6 +2532,13 @@ def _save_checkpoint(
                     },
                     temporary / "optimizer.pt",
                 )
+                if (output_dir/"resolved_config.yaml").is_file():
+                    shutil.copyfile(output_dir/"resolved_config.yaml", temporary/"resolved_config.yaml")
+                (temporary/"training_state.json").write_text(json.dumps({
+                    "optimizer_step": step, "world_size": distributed.world_size,
+                    "final": bool(final), "ppo_minibatch_offset": int(getattr(model, "_topd_pending_offset", 0)),
+                    "pending_rollout": getattr(model, "_topd_pending_rollout", {}).get("rollout_index"),
+                }, indent=2)+"\n")
         distributed.barrier()
 
         pending = getattr(model, "_topd_pending_rollout", None)
@@ -4797,6 +4849,11 @@ def run_training(
                 checkpoint_started = time.perf_counter()
                 if distributed.is_main:
                     progress.set_postfix_str("stage=checkpoint", refresh=True)
+                if (trajectory_engine is not None and current_step == max_steps
+                        and save_interval > 0 and current_step % save_interval == 0):
+                    # A final step on the interval owns both immutable names.
+                    _save_checkpoint(training_student, tokenizer, optimizer, output_dir,
+                        current_step, False, bool(training.get("save_optimizer", True)), distributed)
                 checkpoint_path = _save_checkpoint(
                     training_student,
                     tokenizer,
@@ -4812,6 +4869,17 @@ def run_training(
                     time.perf_counter() - checkpoint_started
                 )
                 checkpoints_by_step[current_step] = checkpoint_path
+            if trajectory_engine is not None:
+                topd_row = _metrics["topd"]
+                topd_row["checkpoint_time_sec"] = _metrics["checkpoint_time_sec"]
+                topd_row["main_rollout_time_per_step_sec"] = distributed.max_float(rollout_time)/rollout_ppo_minibatches
+                topd_row["original_scoring_time_per_step_sec"] = distributed.max_float(student_base_time+teacher_base_time)/rollout_ppo_minibatches
+                topd_row["amortized_step_time_sec"] = (topd_row["optimizer_update_wall_time_sec"]
+                    + topd_row["main_rollout_time_per_step_sec"]+topd_row["original_scoring_time_per_step_sec"]
+                    + topd_row["checkpoint_time_sec"])
+                if distributed.is_main:
+                    _upsert_jsonl_row(output_dir/"topd_metrics.jsonl",
+                        {"step": current_step, **_metrics["topd"]}, ("step",))
             if should_evaluate:
                 evaluation_path = checkpoint_path
                 temporary = False
@@ -4841,6 +4909,8 @@ def run_training(
                 progress.update(1)
 
         if trajectory_engine is not None:
+            trajectory_engine.rollout_peak_allocated = 0
+            trajectory_engine.rollout_peak_reserved = 0
             trajectory_engine.dataset_indices = indices
             trajectory_engine.response_indices = response_indices
         train_metrics = _opd_train_step(
@@ -5122,6 +5192,9 @@ def run_training(
         local_eos_responses = int((response_has_eos & active_responses).sum().item())
         local_peak_allocated = torch.cuda.max_memory_allocated(device)
         local_peak_reserved = torch.cuda.max_memory_reserved(device)
+        if trajectory_engine is not None:
+            local_peak_allocated = max(local_peak_allocated, trajectory_engine.rollout_peak_allocated)
+            local_peak_reserved = max(local_peak_reserved, trajectory_engine.rollout_peak_reserved)
         wall_time = distributed.max_float(local_wall_time)
         valid_tokens = distributed.sum_int(local_valid_tokens)
         trajectory_count = distributed.sum_int(local_response_count)

@@ -92,8 +92,24 @@ def validate_config(config):
     if t["future_top_p"] == 0:
         raise ValueError("future_top_p must be positive")
     for key in ("generation_batch_size", "loss_micro_batch_size", "ot_max_iterations"):
+        if key != "ot_max_iterations" and t[key] == "auto":
+            continue
         if int(t[key]) != t[key] or t[key] <= 0:
             raise ValueError(f"Invalid {key}")
+    if t.get("future_backend", "shared_prefix") not in {"shared_prefix", "reference"}:
+        raise ValueError("Invalid future_backend")
+    for key in ("generation_max_batch_size", "generation_token_budget", "loss_max_batch_size", "loss_token_budget", "ot_workers", "kl_chunk_tokens"):
+        if key in t and (int(t[key]) != t[key] or t[key] < 1):
+            raise ValueError(f"Invalid {key}")
+    for key in ("workspace_fraction", "prefix_pool_fraction"):
+        if key in t and not 0 < float(t[key]) <= 1:
+            raise ValueError(f"Invalid {key}")
+    if float(t.get("memory_headroom_gib", 8)) < 0:
+        raise ValueError("Invalid memory_headroom_gib")
+    if int(c["training"].get("save_interval", 0)) <= 0:
+        raise ValueError("training.save_interval must be positive")
+    if not c["training"].get("save_optimizer", True) or not c["training"].get("save_checkpoints", True):
+        raise ValueError("TOPD requires complete model/optimizer/RNG checkpoints")
     if t["candidate_budget"] is not None and (int(t["candidate_budget"]) != t["candidate_budget"] or t["candidate_budget"] < 0):
         raise ValueError("candidate_budget must be nonnegative integer or null")
     from .algorithm import trajectory_denominator
@@ -134,6 +150,7 @@ def launch_config():
         c["topd"] = topd_settings
         c["experiment"].update(method="topd", require_b200=True, allow_existing_output=False)
         c["training"].update(resume_from_checkpoint=None, resume_allow_config_mismatch=False)
+        c["training"].update(save_interval=20, save_checkpoints=True, save_optimizer=True)
         # Keep the historical duration visible: validate_config rejects a
         # 3-epoch baseline instead of claiming it matches this 1-epoch task.
     # All entrypoint environment variables are read here, with typed parsing;
@@ -147,6 +164,7 @@ def launch_config():
         "TRAIN_PREFER_SOURCE_PROMPT": ("data.prefer_source_prompt", boolean),
         "MICRO_BATCH_SIZE_PER_GPU": ("training.micro_batch_size_per_gpu", int),
         "SCORE_MICRO_BATCH_SIZE": ("selector.score_micro_batch_size", int),
+        "SAVE_INTERVAL": ("training.save_interval", int),
         "TOPD_LAMBDA": ("topd.lambda_topd", float),
         "TOPD_CANDIDATE_FRACTION": ("topd.candidate_fraction", float),
         "TOPD_OT_QUANTILE": ("topd.ot_quantile", float),
@@ -154,8 +172,16 @@ def launch_config():
         "TOPD_DIVERGENCE_MODE": ("topd.divergence_mode", str),
         "TOPD_NORMALIZATION": ("topd.trajectory_normalization", str),
         "TOPD_OT_SOLVER": ("topd.ot_solver", str),
-        "TOPD_GENERATION_BATCH_SIZE": ("topd.generation_batch_size", int),
-        "TOPD_LOSS_MICRO_BATCH_SIZE": ("topd.loss_micro_batch_size", int),
+        "TOPD_GENERATION_BATCH_SIZE": ("topd.generation_batch_size", lambda value: value if value == "auto" else int(value)),
+        "TOPD_LOSS_MICRO_BATCH_SIZE": ("topd.loss_micro_batch_size", lambda value: value if value == "auto" else int(value)),
+        "TOPD_FUTURE_BACKEND": ("topd.future_backend", str),
+        "TOPD_GENERATION_MAX_BATCH_SIZE": ("topd.generation_max_batch_size", int),
+        "TOPD_LOSS_MAX_BATCH_SIZE": ("topd.loss_max_batch_size", int),
+        "TOPD_GENERATION_TOKEN_BUDGET": ("topd.generation_token_budget", int),
+        "TOPD_LOSS_TOKEN_BUDGET": ("topd.loss_token_budget", int),
+        "TOPD_MEMORY_HEADROOM_GIB": ("topd.memory_headroom_gib", float),
+        "TOPD_OT_WORKERS": ("topd.ot_workers", int),
+        "TOPD_PROFILE_STEPS": ("topd.profile_steps", lambda value: [int(item) for item in value.split(",") if item.strip()]),
         "FSDP_TEACHER_CPU_OFFLOAD": ("distributed.fsdp.teacher_cpu_offload", boolean),
         "VERIFY_OFFICIAL_WEIGHTS": ("topd.verify_official_weights", boolean),
     }

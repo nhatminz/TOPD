@@ -4,9 +4,11 @@ import hashlib
 import json
 import math
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import torch
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -21,10 +23,12 @@ from b200_experiment.scoring import (
 from b200_experiment.vllm_rollout import rollout_batch_from_token_ids
 
 from .algorithm import (
-    SparseTargets, cosine_ground_cost, divergence_mask, extract_prefix,
-    forward_kl, select_candidates, solve_transport, trajectory_denominator,
+    SparseTargets, divergence_mask, extract_prefix,
+    forward_kl, batched_forward_kl, select_candidates, solve_transport, trajectory_denominator,
     transport_targets,
 )
+from .generation import generate_shared_futures
+from .runtime import automatic_batch_size, use_accumulation_no_sync
 
 
 def pad_prefixes(prefixes, pad_id, device):
@@ -119,6 +123,8 @@ class TOPDEngine:
         self.output_dir = Path(output_dir) if output_dir else None
         self.windows = []
         self.metrics = {}
+        self.embedding_cache = {}  # frozen teacher only; never cache student KV
+        self.accumulate_no_sync = False
 
     def _common_embeddings(self, token_sequences):
         """Teacher input table for BOTH trajectories, with root-only FSDP gather.
@@ -126,14 +132,51 @@ class TOPDEngine:
         Only embedding/root parameters are gathered, not all decoder blocks.
         The table is never cached, trained, decoded or re-tokenized.
         """
-        lengths = [len(ids) for ids in token_sequences]
-        ids = torch.cat(token_sequences).to(self.distributed.device)
+        if not token_sequences:
+            return []
+        ids = torch.cat(token_sequences).cpu()
+        unique = ids.unique(sorted=True).tolist()
+        missing = [token for token in unique if token not in self.embedding_cache]
+        # Root summons are collective even for a rank with zero missing IDs.
         context = (FSDP.summon_full_params(self.teacher, recurse=False, writeback=False)
                    if is_fsdp_model(self.teacher) else nullcontext())
         with torch.no_grad(), context:
             embedding = unwrap_model(self.teacher).get_input_embeddings()
-            vectors = embedding(ids.to(embedding.weight.device)).detach().float().cpu()
-        return list(vectors.split(lengths))
+            if missing:
+                vectors = embedding(torch.tensor(missing, device=embedding.weight.device)).detach().float().cpu()
+                vectors = vectors.double()
+                if not torch.isfinite(vectors).all() or (vectors.norm(dim=-1) <= 1e-12).any():
+                    raise FloatingPointError("Invalid frozen teacher embeddings")
+                vectors = torch.nn.functional.normalize(vectors, dim=-1)
+                self.embedding_cache.update(zip(missing, vectors.unbind()))
+        # Return unique normalized vectors, not a duplicated N*K*hidden array.
+        return self.embedding_cache
+
+    def _generate_reference(self, rollout, pairs, prefixes, seeds):
+        """Retained scalar/FSDP path for equivalence tests and explicit benchmarks."""
+        d, cfg = self.distributed, self.cfg
+        batch = int(cfg.get("reference_generation_batch_size", 4))
+        rounds = math.ceil(d.max_int(len(pairs))/batch)
+        results = {"student": [], "teacher": []}
+        physical = tokens = 0
+        kwargs = dict(pad_id=self.tokenizer.pad_token_id,
+            eos_ids=generation_stop_token_ids(self.tokenizer, self.config),
+            window=cfg["future_window"], temperature=cfg["future_temperature"],
+            top_p=cfg["future_top_p"], distributed=d)
+        for index in range(rounds):
+            chunk = prefixes[index*batch:(index+1)*batch]
+            request_seeds = seeds[index*batch:(index+1)*batch]
+            count = len(chunk)
+            if not chunk:
+                chunk = [rollout.input_ids[0, :rollout.prompt_width][rollout.attention_mask[0, :rollout.prompt_width].bool()]]
+                request_seeds = [int(cfg["future_seed"])+index*batch]
+            for role, model, offset in (("teacher", self.teacher, 1000000000007), ("student", self.student, 0)):
+                generated = generate_near_future(model, chunk, seeds=[seed+offset for seed in request_seeds], **kwargs)
+                results[role].extend(generated[:count])
+                tokens += sum(map(len, generated))
+            physical += len(chunk)
+        return results["student"], results["teacher"], dict(physical_requests=physical,
+            physical_tokens=tokens, collective_filler_requests=physical-len(pairs))
 
     def prepare(self, rollout, local_indices, reference, valid_mask, step):
         """Fresh teacher AND pre-update student continuations for this PPO group."""
@@ -142,68 +185,77 @@ class TOPDEngine:
         start = time.perf_counter()
         cuda_sync(d.device)
         local_loss = -reference.advantages.detach().sum(-1)
+        losses_cpu = local_loss.cpu()
         group_mask = torch.zeros_like(valid_mask)
         group_mask[local_indices] = valid_mask[local_indices]
-        pairs, thresholds = select_candidates(local_loss, group_mask,
+        pairs, thresholds = select_candidates(losses_cpu, group_mask.cpu(),
             fraction=cfg["candidate_fraction"], budget=cfg.get("candidate_budget"),
             min_loss=cfg.get("candidate_min_loss"))
-        batch = int(cfg["generation_batch_size"])
-        rounds = math.ceil(d.max_int(len(pairs))/batch)
+        # Freeze the prefix and seed identity before reordering/batching requests.
+        # Ordinal is exactly the previous chunk*batch+j; it is batch-size invariant.
+        # Transfer the main trajectory once, not a long GPU prefix per candidate.
+        prefix_source = SimpleNamespace(input_ids=rollout.input_ids.cpu(),
+            attention_mask=rollout.attention_mask.cpu(), response_ids=rollout.response_ids.cpu(),
+            valid_mask=rollout.valid_mask.cpu(), prompt_width=rollout.prompt_width,
+            actor_positions=rollout.actor_positions)
+        prefixes = [extract_prefix(prefix_source, row, index) for row, index in pairs]
+        limit = getattr(unwrap_model(self.student).config, "max_position_embeddings", None)
+        if limit and any(prefix.numel()+cfg["future_window"] > limit for prefix in prefixes):
+            raise ValueError("TOPD prefix + 50-token future exceeds student context")
+        seeds = [int(cfg["future_seed"])+step*10000019+d.rank*100003+ordinal for ordinal in range(len(pairs))]
         window_pairs, diagnostics = [], []
-        generation_seconds = ot_seconds = 0.
-        physical_requests = physical_student_tokens = physical_teacher_tokens = 0
         student_lengths, teacher_lengths = [], []
-        for chunk in range(rounds):
-            real = pairs[chunk*batch:(chunk+1)*batch]
-            # Every rank executes matching FSDP collectives. Filler requests
-            # never enter selection, metrics, targets or the objective.
-            count = max(1, len(real))
-            prefixes = [extract_prefix(rollout, row, index) for row, index in real]
-            if not prefixes:
-                prefixes = [rollout.input_ids[0, :rollout.prompt_width][
-                    rollout.attention_mask[0, :rollout.prompt_width].bool()].clone()]
-            limit = getattr(unwrap_model(self.student).config, "max_position_embeddings", None)
-            if limit and any(p.numel()+cfg["future_window"] > limit for p in prefixes):
-                raise ValueError("TOPD prefix + 50-token future exceeds student context")
-            # Stable request seeds, disjoint teacher/student streams. Main
-            # rollout seed stays exactly as in the comparison experiment.
-            seeds = [int(cfg["future_seed"]) + step*10000019 + d.rank*100003
-                     + chunk*batch + j for j in range(count)]
-            cuda_sync(d.device)
-            generated_at = time.perf_counter()
-            kwargs = dict(pad_id=self.tokenizer.pad_token_id,
-                eos_ids=generation_stop_token_ids(self.tokenizer, self.config),
-                window=cfg["future_window"], temperature=cfg["future_temperature"],
-                top_p=cfg["future_top_p"], distributed=d)
-            teacher = generate_near_future(self.teacher, prefixes,
-                seeds=[seed+1000000000007 for seed in seeds], **kwargs)
-            student = generate_near_future(self.student, prefixes, seeds=seeds, **kwargs)
-            physical_requests += len(prefixes)
-            physical_student_tokens += sum(map(len, student))
-            physical_teacher_tokens += sum(map(len, teacher))
-            cuda_sync(d.device)
-            generation_seconds += time.perf_counter()-generated_at
-            ot_at = time.perf_counter()
-            vectors = self._common_embeddings(student+teacher)
-            for j, (row, index) in enumerate(real):
-                if not len(student[j]) or not len(teacher[j]):
-                    raise RuntimeError("Empty near-future continuation")
-                cost = cosine_ground_cost(vectors[j], vectors[count+j])
-                plan, distance = solve_transport(cost, solver=cfg["ot_solver"],
-                    epsilon=cfg["sinkhorn_epsilon"],
-                    max_iterations=cfg["ot_max_iterations"], tolerance=cfg["ot_tolerance"])
-                target = transport_targets(plan, teacher[j])
-                window_pairs.append(FutureWindow(prefixes[j].detach().cpu(), student[j],
-                    target, row, index, distance))
-                student_lengths.append(len(student[j]))
-                teacher_lengths.append(len(teacher[j]))
-                diagnostics.append({"row": row, "response_token_index": index,
-                    "local_loss": float(local_loss[row, index]), "ot_distance": distance,
-                    "prefix_sha256": hashlib.sha256(prefixes[j].cpu().numpy().tobytes()).hexdigest(),
-                    "student_future": student[j].tolist(), "teacher_future": teacher[j].tolist(),
-                    "ot_row_error": float((plan.sum(1)-1/len(student[j])).abs().max()),
-                    "ot_column_error": float((plan.sum(0)-1/len(teacher[j])).abs().max())})
-            ot_seconds += time.perf_counter()-ot_at
+        cuda_sync(d.device)
+        generated_at = time.perf_counter()
+        generation_metrics = {}
+        if cfg.get("future_backend", "shared_prefix") == "reference":
+            student, teacher, physical = self._generate_reference(rollout, pairs, prefixes, seeds)
+        else:
+            kwargs = dict(settings=cfg, pad_id=self.tokenizer.pad_token_id,
+                eos_ids=generation_stop_token_ids(self.tokenizer, self.config), distributed=d)
+            teacher, teacher_metrics = generate_shared_futures(self.teacher, prefixes, pairs,
+                [seed+1000000000007 for seed in seeds], **kwargs)
+            student, student_metrics = generate_shared_futures(self.student, prefixes, pairs, seeds, **kwargs)
+            generation_metrics = {f"{role}_future_{name}": value for role, items in
+                (("teacher", teacher_metrics), ("student", student_metrics)) for name, value in items.items()}
+            physical = dict(physical_requests=len(pairs), physical_tokens=sum(map(len, student+teacher)), collective_filler_requests=0)
+        cuda_sync(d.device)
+        generation_seconds = time.perf_counter()-generated_at
+        ot_at = time.perf_counter()
+        # All ranks perform exactly one root summon, including an empty rank.
+        # Give an empty rank a zero-length token tensor for collective ordering.
+        vectors = self._common_embeddings(student+teacher if pairs else [torch.empty(0, dtype=torch.long)])
+        embedding_seconds = time.perf_counter()-ot_at
+
+        def solve_one(j):
+            row, index = pairs[j]
+            if not len(student[j]) or not len(teacher[j]):
+                raise RuntimeError("Empty near-future continuation")
+            student_vectors = torch.stack([vectors[token] for token in student[j].tolist()])
+            teacher_vectors = torch.stack([vectors[token] for token in teacher[j].tolist()])
+            cost = (1-student_vectors@teacher_vectors.T).clamp(0, 2)
+            plan, distance = solve_transport(cost, solver=cfg["ot_solver"],
+                epsilon=cfg["sinkhorn_epsilon"], max_iterations=cfg["ot_max_iterations"], tolerance=cfg["ot_tolerance"])
+            target = transport_targets(plan, teacher[j])
+            diagnostic = dict(row=row, response_token_index=index, local_loss=float(losses_cpu[row, index]), ot_distance=distance)
+            if cfg.get("log_candidate_details", False):
+                diagnostic.update(prefix_sha256=hashlib.sha256(prefixes[j].numpy().tobytes()).hexdigest(),
+                    student_future=student[j].tolist(), teacher_future=teacher[j].tolist(),
+                    ot_row_error=float((plan.sum(1)-1/len(student[j])).abs().max()),
+                    ot_column_error=float((plan.sum(0)-1/len(teacher[j])).abs().max()))
+            return FutureWindow(prefixes[j], student[j], target, row, index, distance), diagnostic
+
+        workers = min(int(cfg.get("ot_workers", 1)), len(pairs))
+        if workers > 1:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                solved = list(pool.map(solve_one, range(len(pairs))))
+        else:
+            solved = [solve_one(j) for j in range(len(pairs))]
+        for result, diagnostic in solved:
+            window_pairs.append(result)
+            diagnostics.append(diagnostic)
+        student_lengths, teacher_lengths = list(map(len, student)), list(map(len, teacher))
+        ot_seconds = time.perf_counter()-ot_at
         gathered_distances = d.all_gather_objects([w.distance for w in window_pairs])
         distances = [v for rank in gathered_distances for v in rank]
         accepted, cutoff = divergence_mask(distances, mode=cfg["divergence_mode"],
@@ -236,9 +288,9 @@ class TOPDEngine:
             extra_student_continuations=d.sum_int(len(student_lengths)),
             extra_teacher_tokens=d.sum_int(sum(teacher_lengths)),
             extra_student_tokens=d.sum_int(sum(student_lengths)),
-            extra_teacher_continuations_physical=d.sum_int(physical_requests),
-            extra_student_continuations_physical=d.sum_int(physical_requests),
-            extra_generated_tokens_physical=d.sum_int(physical_student_tokens+physical_teacher_tokens),
+            extra_teacher_continuations_physical=d.sum_int(physical["physical_requests"]),
+            extra_student_continuations_physical=d.sum_int(physical["physical_requests"]),
+            extra_generated_tokens_physical=d.sum_int(physical["physical_tokens"]),
             student_window_lengths=quantiles([v for rank in d.all_gather_objects(student_lengths) for v in rank]),
             teacher_window_lengths=quantiles([v for rank in d.all_gather_objects(teacher_lengths) for v in rank]),
             trajectory_loss_tokens=total_tokens,
@@ -247,16 +299,19 @@ class TOPDEngine:
             effective_per_token_gradient_factor=cfg["lambda_topd"]/self.denominator,
             future_generation_time_sec=d.max_float(generation_seconds),
             ot_time_sec=d.max_float(ot_seconds),
+            embedding_extraction_time_sec=d.max_float(embedding_seconds),
+            **{key: d.max_float(value) for key, value in generation_metrics.items()},
             prepare_time_sec=d.max_float(time.perf_counter()-start),
             # Costs of dummy collective requests are real, though excluded
             # from scientific candidate/rollout counts.
-            collective_filler_requests=d.sum_int(sum(max(1,min(batch,max(0,len(pairs)-i*batch)))-min(batch,max(0,len(pairs)-i*batch)) for i in range(rounds))))
+            collective_filler_requests=d.sum_int(physical["collective_filler_requests"]))
         if hasattr(self, "dataset_indices"):
             self.metrics["consumed_example_responses"] = [pair
                 for rank in d.all_gather_objects([
                     [self.dataset_indices[row], self.response_indices[row]]
                     for row in local_indices]) for pair in rank]
         self.diagnostics = diagnostics
+        self.accumulate_no_sync = use_accumulation_no_sync(self.student, d, cfg)
         self.student.train()
         unwrap_model(self.student).config.use_cache = False
         return self.metrics
@@ -264,11 +319,18 @@ class TOPDEngine:
     def backward(self, rollout, step):
         """Accumulate forward-KL gradients before the shared clip/optimizer step."""
         d, cfg = self.distributed, self.cfg
-        batch = int(cfg["loss_micro_batch_size"])
+        longest = max((window.prefix.numel() for window in self.windows), default=1)
+        batch = automatic_batch_size(self.student, d.device, prefix_length=longest,
+            future_length=cfg["future_window"], settings=cfg, phase="backward",
+            requested=cfg["loss_micro_batch_size"])
+        # Identical collective order; padding-only ranks still run a zero loss.
+        batch = -d.max_int(-batch)
+        windows_sorted = sorted(self.windows, key=lambda window: (window.prefix.numel()+len(window.student_tokens)), reverse=True)
         rounds = math.ceil(d.max_int(len(self.windows))/batch)
-        numerator, began = 0., time.perf_counter()
+        numerator = torch.zeros((), device=d.device)
+        began = time.perf_counter()
         for chunk in range(rounds):
-            windows = self.windows[chunk*batch:(chunk+1)*batch]
+            windows = windows_sorted[chunk*batch:(chunk+1)*batch]
             active_count = len(windows)
             if not windows:
                 prefix = rollout.input_ids[0, :rollout.prompt_width][
@@ -282,22 +344,29 @@ class TOPDEngine:
             width = future.response_ids.shape[1]
             kwargs, selection = rollout_forward_inputs(self.student, future,
                 torch.arange(len(windows), device=d.device), width)
-            output = self.student(**kwargs)
-            logits = select_rollout_logits(output.logits, selection)
-            # FP32 reduction is bounded to one short window at a time. Prompt
-            # logits never enter the target; targets/plans are detached.
-            loss_sum = logits.sum()*0 if not active_count else sum(
-                forward_kl(logits[j, :len(w.student_tokens)], w.target,
-                    temperature=cfg["trajectory_temperature"]).sum()
-                for j, w in enumerate(windows))
-            if not loss_sum.requires_grad:
-                raise RuntimeError("Student trajectory KL lost its gradient graph")
-            scaled = loss_sum * (cfg["lambda_topd"]*d.world_size/self.denominator)
-            scaled.backward()
-            numerator += float(loss_sum.detach())
+            sync_context = (self.student.no_sync() if self.accumulate_no_sync
+                and chunk+1 < rounds and hasattr(self.student, "no_sync") else nullcontext())
+            with sync_context:
+                output = self.student(**kwargs)
+                logits = select_rollout_logits(output.logits, selection)
+                if not active_count:
+                    loss_sum = logits.sum()*0
+                elif cfg.get("batched_kl", True):
+                    loss_sum = batched_forward_kl(logits, [window.target for window in windows],
+                        temperature=cfg["trajectory_temperature"], chunk_size=int(cfg.get("kl_chunk_tokens", 32)))
+                else:
+                    loss_sum = sum(forward_kl(logits[j, :len(window.student_tokens)], window.target,
+                        temperature=cfg["trajectory_temperature"]).sum() for j, window in enumerate(windows))
+                if not loss_sum.requires_grad:
+                    raise RuntimeError("Student trajectory KL lost its gradient graph")
+                scaled = loss_sum * (cfg["lambda_topd"]*d.world_size/self.denominator)
+                scaled.backward()
+                numerator += loss_sum.detach()
             del output, logits, loss_sum, scaled, future
         cuda_sync(d.device)
-        self.metrics.update(trajectory_loss=d.sum_float(numerator)/self.denominator,
+        self.metrics.update(trajectory_loss=d.sum_float(float(numerator))/self.denominator,
+            trajectory_micro_batch_size=batch, trajectory_backward_batches=rounds,
+            accumulation_no_sync=self.accumulate_no_sync,
             trajectory_update_time_sec=d.max_float(time.perf_counter()-began))
         self.metrics["weighted_trajectory_loss"] = self.metrics["trajectory_loss"]*cfg["lambda_topd"]
         return self.metrics
@@ -309,6 +378,10 @@ class TOPDEngine:
             gradient_norm=float(gradient_norm),
             peak_gpu_memory_bytes=d.max_int(torch.cuda.max_memory_allocated(d.device))
                 if d.device.type == "cuda" else 0)
+        self.metrics["peak_gpu_reserved_bytes"] = (d.max_int(torch.cuda.max_memory_reserved(d.device))
+            if d.device.type == "cuda" else 0)
+        self.metrics["future_weight_gather_time_sec"] = sum(self.metrics.get(f"{role}_future_weight_gather_time_sec", 0.)
+            for role in ("teacher", "student"))
         self.metrics["student_update_time_sec"] = (self.metrics.get("opd_update_time_sec", 0.)
             + self.metrics["trajectory_update_time_sec"])
         self.metrics["supervision_tokens_per_second"] = (

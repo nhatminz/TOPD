@@ -87,7 +87,11 @@ def prepare(args):
             "output": config["experiment"]["output_dir"], "assets_verified": False,
             "teacher": config["models"]["teacher_path"],
             "student": config["models"]["student_path"],
-            "training_data": config["data"]["path"]}, indent=2))
+            "training_data": config["data"]["path"],
+            "save_interval": config["training"]["save_interval"],
+            "future_backend": config["topd"].get("future_backend"),
+            "generation_batch_size": config["topd"]["generation_batch_size"],
+            "loss_micro_batch_size": config["topd"]["loss_micro_batch_size"]}, indent=2))
         return
     import torch
     if not torch.cuda.is_available() or torch.cuda.device_count() == 0:

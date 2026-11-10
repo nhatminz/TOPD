@@ -1,9 +1,9 @@
 {
   "date": "2026-11-10",
   "unit_and_regression_tests": {
-    "passed": 98,
+    "passed": 125,
     "failed": 0,
-    "elapsed_seconds": 15.74,
+    "elapsed_seconds": 27.19,
     "junit": "docs/test_results.xml"
   },
   "smoke": {
@@ -31,14 +31,14 @@
       "rejected_candidates": 0
     },
     "times": {
-      "prepare_time_sec": 0.6527243470773101,
-      "future_generation_time_sec": 0.6165808737277985,
-      "ot_time_sec": 0.029121302999556065,
-      "trajectory_update_time_sec": 0.013146135956048965
+      "prepare_time_sec": 0.5887094903737307,
+      "future_generation_time_sec": 0.5539106111973524,
+      "ot_time_sec": 0.02750129997730255,
+      "trajectory_update_time_sec": 0.014492575079202652
     },
     "status": "passed",
     "synthetic_only": true,
-    "run_directory": "outputs/smoke/tiny-qwen3-t3sd_58n",
+    "run_directory": "outputs/smoke/tiny-qwen3-6cu0s3y8",
     "mid_rollout_resume_matches_uninterrupted": true,
     "teacher_frozen": true,
     "student_updated": true,
@@ -86,5 +86,46 @@
     ],
     "fresh_and_legacy_resume_empty_schedule_verified": true,
     "orchestration_callback_guard_passed": true
+  },
+  "throughput_followup": {
+    "hardware_detected": "one NVIDIA GeForce RTX 3090 (24576 MiB); verification interpreter has CPU PyTorch",
+    "b200_hardware_available": false,
+    "b200_seconds_per_step_before": {
+      "value": 900,
+      "source": "approximately user-reported; not remeasured"
+    },
+    "b200_seconds_per_step_after": null,
+    "b200_throughput_tokens_per_second": null,
+    "b200_peak_gpu_memory_bytes": null,
+    "speedup_verified": false,
+    "full_training_started": false,
+    "full_shard_cpu_two_rank_tests": [
+      "FP32",
+      "BF16"
+    ],
+    "gradient_equivalence": {
+      "fp32_relative_l2_error": 1.0471683964397016e-07,
+      "fp32_max_parameter_error": 1.862645149230957e-09,
+      "bf16_relative_l2_error": 0.0036731192376464605,
+      "bf16_max_parameter_error": 4.76837158203125e-07,
+      "bf16_total_loss_error": 4.5776367207928104e-07,
+      "optimizer": "AdamW lr=5e-6, betas=(.9,.95), weight_decay=0",
+      "scope": "tiny Qwen3, CPU/Gloo FULL_SHARD, no B200 CUDA equivalence claim"
+    },
+    "seeded_future_equivalence": "K50, greedy and stochastic top-p, per-request seeds, multiple batch sizes",
+    "checkpoints": {
+      "save_interval": 20,
+      "inspected_steps": [
+        20,
+        40,
+        60,
+        80
+      ],
+      "final_saved": true,
+      "immutable": true,
+      "model_optimizer_rng_metadata": true
+    },
+    "benchmark_entrypoint": "scripts/benchmark_b200.sh",
+    "details": "docs/PERFORMANCE.md"
   }
 }

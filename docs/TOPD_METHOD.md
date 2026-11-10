@@ -40,11 +40,12 @@ teacher and current pre-update student independently generate from these exact
 IDs. No reference/gold response enters generation. Per-request RNG streams are
 disjoint between teacher and student and do not consume the main rollout RNG.
 
-HF causal KV caches are reused within each future; generation batches prefixes.
-It forwards through the FSDP wrapper rather than materializing both whole models
-or unwrapping decoder forward calls. All ranks execute identical numbers of
-generation rounds and synchronized EOS exits; ranks without candidates use
-collective-only fillers. Include the first EOS, stop there, exclude later pads.
+Future inference now materializes one role's complete current parameters at a
+time, once per update, and bypasses all nested FSDP forwards during inference.
+It prefills each selected original response once, forks independent causal KV
+slices and batches decode by length/VRAM across responses. Caches expire within
+the update. Ranks enter the same materialization contexts but decode locally;
+empty ranks need no generation fillers. Include the first EOS, stop there, exclude later pads.
 Suppress a distinct padding ID during future sampling; an EOS sharing that ID
 remains sampleable. Main vLLM rollout behavior is unchanged.
 
@@ -55,6 +56,9 @@ The ground cost is `C[i,j] = 1 - cosine(E_teacher[s_i], E_teacher[t_j])`:
 Zero/nonfinite embeddings raise an error. Tokenizer vocabularies and IDs must
 match exactly. Only required vectors are gathered from the teacher table; FSDP
 root-only parameter materialization avoids gathering every decoder block.
+Normalized FP64 vectors for required unique teacher IDs are cached because
+the teacher is frozen. Sparse LP constraints are cached by shape; the exact
+assignment/HiGHS objective and target normalization are preserved.
 
 Uniform marginals use actual valid future lengths `n` and `m`:
 `P.sum(1)=1/n`, `P.sum(0)=1/m`. Equal lengths use exact Hungarian assignment
@@ -83,7 +87,11 @@ For each accepted window use its independently generated student tokens.
 `padded_prefix_width - 1 + i`. Inputs to that predictor contain the original
 prefix and generated student tokens strictly before `i`; no teacher suffix is
 teacher-forced into the student context. Student forwards and backward happen
-with autograd enabled, with stable FP32 logsumexp over the full vocabulary:
+with autograd enabled, with stable FP32 logsumexp over the full vocabulary.
+Length-bucketed adaptive microbatches retain full prefix gradients. The batched
+KL recomputes FP32 softmax in vocabulary-bounded backward chunks; no prefix
+cache is detached/reused for differentiable training. See `PERFORMANCE.md` for
+gradient-equivalence checks, memory controls and bounded B200 benchmarking.
 
 ```text
 KL_i = sum_v target_i(v) log target_i(v)

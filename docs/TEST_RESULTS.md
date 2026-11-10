@@ -1,6 +1,6 @@
 # Validation results — 2026-11-10
 
-**98 tests passed, 0 failed (15.74 seconds)**. Machine-readable evidence:
+**125 tests passed, 0 failed (27.19 seconds)**. Machine-readable evidence:
 [`test_results.xml`](test_results.xml), [`test_results.json`](test_results.json).
 No full training or benchmark accuracy evaluation was started.
 
@@ -155,3 +155,32 @@ The full suite remains at 98 passing tests. Manual configuration checks verified
 an empty evaluation schedule for fresh and old-config resumed launches, with
 resume scientific-setting validation passing. The standalone final multiseed
 planning/aggregation checks remain passing. No production training was started.
+
+## Throughput follow-up
+
+The suite now has 125 passing tests. New coverage includes K=50 seeded sample
+equivalence under greedy/top-p sampling and 1/3/automatic batches, source-prefix
+isolation, fresh student weights after updates, safe decode OOM retry with the
+same request seeds, FP32/BF16 chunked sparse-KL loss/gradient equivalence, exact
+cached OT, full original-OPD+TOPD AdamW update equivalence, real two-process
+FULL_SHARD inference/training and a rank without real candidates. The two
+FSDP tests run FP32 and BF16 on CPU/Gloo; they are not GPU/NCCL benchmarks.
+
+The production AdamW test measured relative gradient L2 errors 1.047e-7 (FP32)
+and .003673 (BF16 rounding), maximum parameter errors 1.863e-9 and 4.768e-7,
+and loss errors 1.526e-7 and 4.578e-7. Full precision uses tight per-parameter
+tolerances; BF16 gradient error is explicitly bounded below .01. The scientific
+objective is unchanged; bitwise CUDA equivalence is not claimed.
+
+Complete, immutable model/optimizer/RNG/config/metadata checkpoints were saved
+and inspected at 20, 40, 60 and 80, and final. Torch, Python and NumPy RNG restore
+was exercised. The actual trainer-orchestration test verifies both an interval
+checkpoint and final when they coincide. A production launcher dry-run resolved
+SAVE_INTERVAL=20, generation/backward auto batches, 4B/non-Base model paths and
+the original training parquet. No model was loaded by that dry-run.
+
+The detected hardware is one RTX 3090; the isolated verification interpreter
+uses CPU PyTorch. Before approximately 900 s/step is user-reported; after-B200
+seconds/step, throughput and memory remain unmeasured. `benchmark_b200.sh` is
+an explicit bounded 2-B200 real-data benchmark, not automatically invoked.
+See `PERFORMANCE.md` for the commands, measurement scopes and remaining costs.
