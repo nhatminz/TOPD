@@ -1,0 +1,47 @@
+_base_: qwen3_b200_cmt.yaml
+
+experiment:
+  method: topd
+  seed: 42
+  output_dir: outputs/topd_compe_math_4b_17b_seed42
+  require_b200: false
+
+models:
+  teacher_path: models/Qwen3-4B
+  student_path: models/Qwen3-1.7B
+
+training:
+  epochs: 1
+  max_steps: null
+
+topd:
+  enabled: true
+  teacher_source: Qwen/Qwen3-4B
+  student_source: Qwen/Qwen3-1.7B
+  # Resolve/pin revisions and verify official safetensors at actual launch.
+  teacher_revision: main
+  student_revision: main
+  future_window: 50
+  # Reproduction assumptions, NOT reported paper hyperparameters.
+  candidate_fraction: 0.02
+  candidate_budget: null
+  candidate_min_loss: null
+  divergence_mode: percentile
+  ot_quantile: 0.5
+  ot_threshold: 0.0
+  min_ot_distance: 1.0e-8
+  ground_cost: teacher_embedding_cosine
+  ot_solver: exact
+  ot_tolerance: 1.0e-7
+  ot_max_iterations: 10000
+  sinkhorn_epsilon: 0.05
+  future_temperature: 1.0
+  future_top_p: 1.0
+  future_seed: 1000042
+  generation_batch_size: 4
+  loss_micro_batch_size: 1
+  trajectory_temperature: 1.0
+  # Mean of each accepted window's SUM of token KLs. K is not divided out.
+  trajectory_normalization: window_mean_sum
+  lambda_topd: 0.01
+  log_candidate_details: false

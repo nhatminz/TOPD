@@ -1,0 +1,67 @@
+{
+  "date": "2026-11-10",
+  "unit_and_regression_tests": {
+    "passed": 69,
+    "failed": 0,
+    "elapsed_seconds": 7.77,
+    "junit": "docs/test_results.xml"
+  },
+  "smoke": {
+    "dataset_examples": 3,
+    "original_rollouts": 6,
+    "optimizer_steps": 3,
+    "epoch_coverage": 1.0,
+    "completed_epochs": 1,
+    "unique_example_response_pairs": 6,
+    "repeated_pairs": 0,
+    "missing_pairs": 0,
+    "peak_gpu_memory_bytes": 0,
+    "counts": {
+      "original_student_rollouts": 6,
+      "extra_teacher_continuations": 6,
+      "extra_student_continuations": 6,
+      "extra_teacher_tokens": 96,
+      "extra_student_tokens": 225,
+      "trajectory_loss_tokens": 225,
+      "extra_generated_tokens_physical": 321,
+      "extra_teacher_continuations_physical": 6,
+      "extra_student_continuations_physical": 6,
+      "high_loss_candidates": 6,
+      "accepted_candidates": 6,
+      "rejected_candidates": 0
+    },
+    "times": {
+      "prepare_time_sec": 0.6348354071378708,
+      "future_generation_time_sec": 0.5990616539493203,
+      "ot_time_sec": 0.028478440828621387,
+      "trajectory_update_time_sec": 0.012789668515324593
+    },
+    "status": "passed",
+    "synthetic_only": true,
+    "run_directory": "/mnt/hdd/nhatminh/OPD/TOPD/outputs/smoke/tiny-qwen3-pmeasisi",
+    "mid_rollout_resume_matches_uninterrupted": true,
+    "teacher_frozen": true,
+    "student_updated": true,
+    "future_window": 50,
+    "checkpoint_reloaded": true
+  },
+  "environment": {
+    "python": "3.12.12 (main, Nov 19 2025, 22:46:53) [Clang 21.1.4 ]",
+    "torch": "2.13.0+cpu",
+    "cuda_available_to_test_interpreter": false,
+    "packages": {
+      "transformers": "4.57.6",
+      "scipy": "1.18.1",
+      "pytest": "8.4.2",
+      "numpy": "2.5.4",
+      "math-verify": "0.9.0",
+      "PyYAML": "6.0.3"
+    },
+    "platform": "Linux-5.15.0-139-generic-x86_64-with-glibc2.35"
+  },
+  "original_source_files_unchanged": 67,
+  "gpu_fsdp_vllm_production_test": "not run: one physical RTX 3090, no two-GPU/B200 training assets",
+  "full_training_started": false,
+  "real_benchmark_accuracy_measured": false,
+  "entrypoint_checks": "docs/entrypoint_checks.json"
+}

@@ -1,0 +1,14 @@
+{
+  "parser_selfcheck": {
+    "status": "passed",
+    "parser": "unchanged math-verify",
+    "examples": 4
+  },
+  "production_on_cpu": "correctly rejected before asset download or training",
+  "comparison_entrypoint": {
+    "output": "/tmp/topd-script-fixture-xi3y_p5u/topd/comparison.json",
+    "matched": true
+  },
+  "visible_gpu_preview_concurrency": 128,
+  "verification_interpreter": "/tmp/topd-verification-iqfpluen/venv/bin/python"
+}
